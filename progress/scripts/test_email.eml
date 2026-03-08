@@ -1,0 +1,14 @@
+From: "PayPal Security Team" <security@paypa1-verify.com>
+To: user@example.com
+Subject: 【紧急】您的 PayPal 账户需要立即验证
+Content-Type: text/html; charset="utf-8"
+
+<html>
+<body>
+<p>尊敬的 PayPal 用户，</p>
+<p>我们检测到您的账户有异常活动。</p>
+<p><a href="http://secure-login-verify.com/account/check?redirect=paypal.com">立即点击此处验证您的身份</a></p>
+<p>如果不立即处理，您的账户将在 24 小时内被冻结！</p>
+<p>此致<br>PayPal 安全团队</p>
+</body>
+</html>
