@@ -9,10 +9,10 @@ from datetime import datetime, timedelta
 from typing import Dict
 from flask import Flask, render_template, request, jsonify, send_from_directory
 from werkzeug.utils import secure_filename
-from .parse_email import parse_email
-from .features import build_feature_vector
-from .detector import PhishingDetector
-from .email_traceback import generate_traceback_report
+from parse_email import parse_email
+from features import build_feature_vector
+from detector import PhishingDetector
+from email_traceback import generate_traceback_report
 
 
 # 初始化 Flask 应用
@@ -24,22 +24,59 @@ PROJECT_DIR = os.path.dirname(APP_DIR)
 DATA_DIR = os.path.join(PROJECT_DIR, 'data')
 MODELS_DIR = os.path.join(PROJECT_DIR, 'models')
 UPLOAD_DIR = os.path.join(PROJECT_DIR, 'uploads')
+CONFIG_DIR = os.path.join(PROJECT_DIR, 'config')
 
 # 确保数据目录存在
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(MODELS_DIR, exist_ok=True)
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+os.makedirs(CONFIG_DIR, exist_ok=True)
 
 DATABASE_PATH = os.path.join(DATA_DIR, 'alerts.db')
+CONFIG_FILE = os.path.join(CONFIG_DIR, 'api_config.json')
 
 # 文件上传配置
 ALLOWED_EXTENSIONS = {'eml', 'msg'}
 MAX_CONTENT_LENGTH = 50 * 1024 * 1024  # 50MB 最大上传限制
 app.config['MAX_CONTENT_LENGTH'] = MAX_CONTENT_LENGTH
 
+# 加载 API 配置
+def load_api_config():
+    """加载 API 配置"""
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except:
+            pass
+    return {
+        'virustotal': {
+            'api_key': '',
+            'api_url': 'https://www.virustotal.com/vtapi/v2/url/report'
+        },
+        'ipapi': {
+            'api_url': 'http://ip-api.com/json/'
+        }
+    }
+
+# 保存 API 配置
+def save_api_config(config):
+    """保存 API 配置"""
+    try:
+        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(config, f, indent=2, ensure_ascii=False)
+        return True
+    except:
+        return False
+
+# 加载配置
+api_config = load_api_config()
+vt_api_key = api_config.get('virustotal', {}).get('api_key', '') or os.environ.get('VT_API_KEY', '')
+vt_api_url = api_config.get('virustotal', {}).get('api_url', 'https://www.virustotal.com/vtapi/v2/url/report')
+ip_api_url = api_config.get('ipapi', {}).get('api_url', 'http://ip-api.com/json/')
+
 # 初始化检测器
 detector = PhishingDetector()
-vt_api_key = os.environ.get('VT_API_KEY', '')
 
 
 def allowed_file(filename: str) -> bool:
@@ -191,13 +228,13 @@ def process_email(raw_email: str):
     parsed = parse_email(raw_email)
 
     # 提取特征
-    features = build_feature_vector(parsed, vt_api_key)
+    features = build_feature_vector(parsed, vt_api_key, vt_api_url)
 
     # 预测
     is_phish, confidence = detector.predict(features)
 
     # 生成溯源报告
-    traceback_report = generate_traceback_report(parsed, vt_api_key)
+    traceback_report = generate_traceback_report(parsed, vt_api_key, ip_api_url)
 
     # 保存到数据库
     save_to_database(parsed, is_phish, confidence, traceback_report)
@@ -390,6 +427,44 @@ def shutdown():
         return jsonify({'status': 'shutting_down'})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+# API 配置管理路由
+@app.route('/api/config')
+def get_api_config():
+    """获取 API 配置"""
+    return jsonify(api_config)
+
+@app.route('/api/config', methods=['POST'])
+def update_api_config():
+    """更新 API 配置"""
+    global api_config, vt_api_key, vt_api_url, ip_api_url
+    try:
+        config = request.get_json()
+        if config:
+            api_config = config
+            save_api_config(api_config)
+            # 更新当前使用的 API 配置
+            vt_api_key = api_config.get('virustotal', {}).get('api_key', '') or os.environ.get('VT_API_KEY', '')
+            vt_api_url = api_config.get('virustotal', {}).get('api_url', 'https://www.virustotal.com/vtapi/v2/url/report')
+            ip_api_url = api_config.get('ipapi', {}).get('api_url', 'http://ip-api.com/json/')
+            return jsonify({'status': 'success', 'message': '配置已保存'})
+        return jsonify({'status': 'error', 'message': '无效的配置数据'}), 400
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/config/test')
+def test_api_connection():
+    """测试 API 连接"""
+    try:
+        test_url = 'https://www.google.com'
+        from features import query_virustotal
+        result = query_virustotal(test_url, vt_api_key, vt_api_url)
+        if result >= 0:
+            return jsonify({'status': 'success', 'message': 'VirusTotal API 连接成功'})
+        else:
+            return jsonify({'status': 'error', 'message': 'VirusTotal API 连接失败'}), 400
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': f'测试失败: {str(e)}'}), 500
 
 
 def save_to_database(parsed: Dict, is_phish: bool, confidence: float,

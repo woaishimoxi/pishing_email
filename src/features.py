@@ -15,7 +15,7 @@ import whois
 import requests
 from urllib.parse import urlparse, parse_qs
 from typing import Dict, List, Optional
-from .parse_email import parse_email
+from parse_email import parse_email
 
 
 # 可疑域名关键词列表 (可扩展)
@@ -163,7 +163,7 @@ def is_short_url(url: str) -> bool:
     return False
 
 
-def query_virustotal(url: str, vt_api_key: str = "") -> float:
+def query_virustotal(url: str, vt_api_key: str = "", vt_api_url: str = "https://www.virustotal.com/vtapi/v2/url/report") -> float:
     """
     查询 VirusTotal 检测率。
     """
@@ -171,9 +171,8 @@ def query_virustotal(url: str, vt_api_key: str = "") -> float:
         return 0.0
 
     try:
-        vt_url = "https://www.virustotal.com/vtapi/v2/url/report"
         params = {'apikey': vt_api_key, 'resource': url}
-        response = requests.get(vt_url, params=params, timeout=10)
+        response = requests.get(vt_api_url, params=params, timeout=10)
 
         if response.status_code == 200:
             result = response.json()
@@ -187,7 +186,7 @@ def query_virustotal(url: str, vt_api_key: str = "") -> float:
     return 0.0
 
 
-def extract_url_features(url: str, vt_api_key: str = "") -> Dict:
+def extract_url_features(url: str, vt_api_key: str = "", vt_api_url: str = "https://www.virustotal.com/vtapi/v2/url/report") -> Dict:
     """
     为单个 URL 提取安全特征（增强版）。
 
@@ -273,7 +272,7 @@ def extract_url_features(url: str, vt_api_key: str = "") -> Dict:
 
         # 查询 VirusTotal
         if vt_api_key:
-            features['vt_detection_ratio'] = query_virustotal(url, vt_api_key)
+            features['vt_detection_ratio'] = query_virustotal(url, vt_api_key, vt_api_url)
 
     except Exception:
         # URL 分析失败静默处理
@@ -491,13 +490,14 @@ def check_domain_similarity(domain1: str, domain2: str) -> bool:
     return normalize(domain1) == normalize(domain2)
 
 
-def build_feature_vector(parsed_email: Dict, vt_api_key: str = "") -> Dict:
+def build_feature_vector(parsed_email: Dict, vt_api_key: str = "", vt_api_url: str = "https://www.virustotal.com/vtapi/v2/url/report") -> Dict:
     """
     构建完整的邮件特征向量（增强版，35+ 维）。
 
     Args:
         parsed_email: 解析后的邮件数据
         vt_api_key: VirusTotal API 密钥
+        vt_api_url: VirusTotal API 的 URL
 
     Returns:
         Dict: 完整的特征向量字典
@@ -507,7 +507,7 @@ def build_feature_vector(parsed_email: Dict, vt_api_key: str = "") -> Dict:
 
     # URL 特征
     urls = parsed_email.get('urls', [])
-    url_features_list = [extract_url_features(url, vt_api_key) for url in urls]
+    url_features_list = [extract_url_features(url, vt_api_key, vt_api_url) for url in urls]
     aggregated_url_features = aggregate_url_features(url_features_list)
 
     # 文本特征

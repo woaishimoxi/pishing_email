@@ -200,14 +200,31 @@ POST /api/shutdown
 
 ## 配置说明
 
-### VirusTotal API（可选）
+### API 配置管理
 
-增强 URL 威胁检测能力。申请地址：https://www.virustotal.com/gui/join
+系统提供了可视化的 API 配置管理界面，可通过以下步骤进行配置：
 
-```bash
-cp .env.example .env
-# 编辑 .env 文件
-VT_API_KEY=your_api_key_here
+1. 登录系统后，点击导航栏中的 "API 配置" 按钮
+2. 在弹出的模态框中，可以配置以下 API：
+   - **VirusTotal API**：增强 URL 威胁检测能力
+   - **IP-API**：IP 地理位置查询
+3. 点击 "测试连接" 按钮验证配置是否正确
+4. 点击 "保存配置" 按钮保存更改
+
+### 配置文件
+
+配置会自动保存到 `config/api_config.json` 文件中，结构如下：
+
+```json
+{
+  "virustotal": {
+    "api_key": "your_virustotal_api_key",
+    "api_url": "https://www.virustotal.com/vtapi/v2/url/report"
+  },
+  "ipapi": {
+    "api_url": "http://ip-api.com/json/"
+  }
+}
 ```
 
 ### 检测阈值
@@ -238,5 +255,5 @@ MIT License
 
 ---
 
-*最后更新：2026-02-26*
-*版本号：v1.1.0*
+*最后更新：2026-03-08*
+*版本号：v1.2.0*

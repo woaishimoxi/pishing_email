@@ -85,12 +85,13 @@ def _is_private_ip(ip: str) -> bool:
     return False
 
 
-def get_ip_geolocation(ip: str) -> Dict:
+def get_ip_geolocation(ip: str, ip_api_url: str = 'http://ip-api.com/json/') -> Dict:
     """
     查询 IP 地理位置信息。
 
     Args:
         ip: IP 地址
+        ip_api_url: IP 地理位置 API 的 URL
 
     Returns:
         Dict: 包含地理位置信息的字典
@@ -104,8 +105,8 @@ def get_ip_geolocation(ip: str) -> Dict:
     }
 
     try:
-        # 使用免费 IP 定位 API
-        response = requests.get(f'http://ip-api.com/json/{ip}', timeout=5)
+        # 使用 IP 定位 API
+        response = requests.get(f'{ip_api_url}{ip}', timeout=5)
         if response.status_code == 200:
             data = response.json()
             if data.get('status') == 'success':
@@ -276,13 +277,14 @@ def check_blacklist(ip: str) -> Dict:
     return result
 
 
-def generate_traceback_report(parsed_email: Dict, vt_api_key: str = "") -> Dict:
+def generate_traceback_report(parsed_email: Dict, vt_api_key: str = "", ip_api_url: str = 'http://ip-api.com/json/') -> Dict:
     """
     生成完整的溯源报告。
 
     Args:
         parsed_email: 解析后的邮件数据
         vt_api_key: VirusTotal API 密钥
+        ip_api_url: IP 地理位置 API 的 URL
 
     Returns:
         Dict: 完整的溯源报告
@@ -303,7 +305,7 @@ def generate_traceback_report(parsed_email: Dict, vt_api_key: str = "") -> Dict:
 
         # 查询源 IP 地理位置
         if source_info['source_ip'] != 'Unknown':
-            geo_info = get_ip_geolocation(source_info['source_ip'])
+            geo_info = get_ip_geolocation(source_info['source_ip'], ip_api_url)
             report['email_source']['geolocation'] = geo_info
 
             # 检查黑名单

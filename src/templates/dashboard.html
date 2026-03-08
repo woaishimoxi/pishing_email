@@ -189,6 +189,9 @@
                 钓鱼邮件检测与溯源系统
             </a>
             <div class="d-flex ms-auto">
+                <button class="btn btn-sm btn-outline-light me-2" type="button" onclick="showApiConfig()">
+                    <i class="bi bi-gear"></i> API 配置
+                </button>
                 <button class="btn btn-sm btn-outline-light" type="button" onclick="shutdownSystem()">
                     <i class="bi bi-power"></i> 关闭系统
                 </button>
@@ -1224,7 +1227,190 @@
             div.textContent = text;
             return div.innerHTML;
         }
+
+        // ========== API 配置管理相关函数 ==========
+
+        // 显示 API 配置模态框
+        function showApiConfig() {
+            const modal = new bootstrap.Modal(document.getElementById('apiConfigModal'));
+            loadApiConfig();
+            modal.show();
+        }
+
+        // 加载 API 配置
+        async function loadApiConfig() {
+            try {
+                const response = await fetch('/api/config');
+                const config = await response.json();
+                
+                // 填充表单
+                document.getElementById('vt-api-key').value = config.virustotal?.api_key || '';
+                document.getElementById('vt-api-url').value = config.virustotal?.api_url || 'https://www.virustotal.com/vtapi/v2/url/report';
+                document.getElementById('ip-api-url').value = config.ipapi?.api_url || 'http://ip-api.com/json/';
+            } catch (error) {
+                console.error('加载 API 配置失败:', error);
+                alert('加载配置失败');
+            }
+        }
+
+        // 测试 API 连接
+        async function testApiConnection() {
+            const testBtn = document.getElementById('test-api-btn');
+            const resultDiv = document.getElementById('api-test-result');
+            
+            testBtn.disabled = true;
+            testBtn.innerHTML = '<i class="bi bi-spinner bi-spin"></i> 测试中...';
+            resultDiv.innerHTML = '';
+            
+            try {
+                const response = await fetch('/api/config/test');
+                const result = await response.json();
+                
+                if (response.ok && result.status === 'success') {
+                    resultDiv.innerHTML = '<div class="alert alert-success"><i class="bi bi-check-circle"></i> ' + result.message + '</div>';
+                } else {
+                    resultDiv.innerHTML = '<div class="alert alert-danger"><i class="bi bi-exclamation-circle"></i> ' + (result.message || '测试失败') + '</div>';
+                }
+            } catch (error) {
+                resultDiv.innerHTML = '<div class="alert alert-danger"><i class="bi bi-exclamation-circle"></i> 测试失败: ' + error.message + '</div>';
+            } finally {
+                testBtn.disabled = false;
+                testBtn.innerHTML = '<i class="bi bi-play-fill"></i> 测试连接';
+            }
+        }
+
+        // 保存 API 配置
+        async function saveApiConfig() {
+            const saveBtn = document.getElementById('save-api-btn');
+            const resultDiv = document.getElementById('api-save-result');
+            
+            saveBtn.disabled = true;
+            saveBtn.innerHTML = '<i class="bi bi-spinner bi-spin"></i> 保存中...';
+            resultDiv.innerHTML = '';
+            
+            const config = {
+                virustotal: {
+                    api_key: document.getElementById('vt-api-key').value,
+                    api_url: document.getElementById('vt-api-url').value
+                },
+                ipapi: {
+                    api_url: document.getElementById('ip-api-url').value
+                }
+            };
+            
+            try {
+                const response = await fetch('/api/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(config)
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok && result.status === 'success') {
+                    resultDiv.innerHTML = '<div class="alert alert-success"><i class="bi bi-check-circle"></i> ' + result.message + '</div>';
+                } else {
+                    resultDiv.innerHTML = '<div class="alert alert-danger"><i class="bi bi-exclamation-circle"></i> ' + (result.message || '保存失败') + '</div>';
+                }
+            } catch (error) {
+                resultDiv.innerHTML = '<div class="alert alert-danger"><i class="bi bi-exclamation-circle"></i> 保存失败: ' + error.message + '</div>';
+            } finally {
+                saveBtn.disabled = false;
+                saveBtn.innerHTML = '<i class="bi bi-save"></i> 保存配置';
+            }
+        }
     </script>
+
+    <!-- API 配置模态框 -->
+    <div class="modal fade" id="apiConfigModal" tabindex="-1" aria-labelledby="apiConfigModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="apiConfigModalLabel">API 连接配置管理</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-4">
+                        <h6><i class="bi bi-virus"></i> VirusTotal API 配置</h6>
+                        <div class="form-group mb-3">
+                            <label for="vt-api-key" class="form-label">API Key</label>
+                            <input type="password" class="form-control" id="vt-api-key" placeholder="输入 VirusTotal API Key">
+                            <small class="text-muted">VirusTotal API 用于增强 URL 威胁检测能力。申请地址：<a href="https://www.virustotal.com/gui/join" target="_blank">https://www.virustotal.com/gui/join</a></small>
+                        </div>
+                        <div class="form-group mb-3">
+                            <label for="vt-api-url" class="form-label">API URL</label>
+                            <input type="url" class="form-control" id="vt-api-url" placeholder="VirusTotal API URL">
+                            <small class="text-muted">默认：https://www.virustotal.com/vtapi/v2/url/report</small>
+                        </div>
+                    </div>
+
+                    <div class="mb-4">
+                        <h6><i class="bi bi-globe"></i> IP-API 配置</h6>
+                        <div class="form-group mb-3">
+                            <label for="ip-api-url" class="form-label">API URL</label>
+                            <input type="url" class="form-control" id="ip-api-url" placeholder="IP 地理位置 API URL">
+                            <small class="text-muted">默认：http://ip-api.com/json/</small>
+                        </div>
+                    </div>
+
+                    <div class="mb-4">
+                        <h6><i class="bi bi-info-circle"></i> API 状态</h6>
+                        <div class="table-responsive">
+                            <table class="table table-sm">
+                                <thead>
+                                    <tr>
+                                        <th>API 名称</th>
+                                        <th>状态</th>
+                                        <th>说明</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr>
+                                        <td>VirusTotal API</td>
+                                        <td><span class="badge bg-warning" id="vt-status">未配置</span></td>
+                                        <td>用于 URL 威胁检测</td>
+                                    </tr>
+                                    <tr>
+                                        <td>IP-API.com</td>
+                                        <td><span class="badge bg-success">可用</span></td>
+                                        <td>免费 IP 地理位置查询</td>
+                                    </tr>
+                                    <tr>
+                                        <td>URL 跳转追踪</td>
+                                        <td><span class="badge bg-success">可用</span></td>
+                                        <td>追踪 URL 跳转链路</td>
+                                    </tr>
+                                    <tr>
+                                        <td>DNSBL 黑名单检查</td>
+                                        <td><span class="badge bg-success">可用</span></td>
+                                        <td>检查 IP 是否在黑名单中</td>
+                                    </tr>
+                                    <tr>
+                                        <td>WHOIS 查询</td>
+                                        <td><span class="badge bg-success">可用</span></td>
+                                        <td>域名信息查询</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div id="api-test-result" class="mb-3"></div>
+                    <div id="api-save-result" class="mb-3"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+                    <button type="button" class="btn btn-info me-2" id="test-api-btn" onclick="testApiConnection()">
+                        <i class="bi bi-play-fill"></i> 测试连接
+                    </button>
+                    <button type="button" class="btn btn-primary" id="save-api-btn" onclick="saveApiConfig()">
+                        <i class="bi bi-save"></i> 保存配置
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
