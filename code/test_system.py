@@ -101,7 +101,9 @@ def main():
         print(f"  - {f}: {features[f]}")
 
     # 测试 3: 检测预测
-    detector = PhishingDetector()
+    # 使用训练好的模型
+    model_path = 'models/phish_detector.txt'
+    detector = PhishingDetector(model_path)
     is_phish, confidence = test_module(
         "检测模型模块",
         detector.predict,
