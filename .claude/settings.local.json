@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir \"c:\\\\Users\\\\k\\\\Desktop\\\\毕设\\\\面向中小型企业的轻量化钓鱼邮件检测与溯源系统设计与实现\" /s /b)",
+      "Bash(python3 -c \"import os; print\\(''\\\\n''.join\\(os.listdir\\(''c:/Users/k/Desktop/毕设/面向中小型企业的轻量化钓鱼邮件检测与溯源系统设计与实现''\\)\\)\\)\")"
+    ]
+  }
+}
