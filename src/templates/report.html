@@ -379,6 +379,12 @@
                         </h5>
                     </div>
                     <div class="card-body">
+                        <!-- 模块评分 -->
+                        <div id="moduleScoresSection" class="mb-4"></div>
+                        
+                        <!-- 评判标准 -->
+                        <div id="judgmentCriteriaSection" class="mb-4"></div>
+                        
                         <!-- 风险指标 -->
                         <div id="riskIndicators" class="mb-4"></div>
                         
@@ -445,14 +451,22 @@
             document.getElementById('report-info').textContent = `报告编号：${reportId} | 生成时间：${timestamp}`;
             
             // 安全评分图表
-            updateSecurityScoreChart(result.confidence, result.is_phish);
+            const isPhish = result.label === 'PHISHING';
+            updateSecurityScoreChart(result.confidence, isPhish, result.label);
             
             // 检测信息
             document.getElementById('detectionTime').textContent = result.detection_time || '未知';
             document.getElementById('detectionTimestamp').textContent = timestamp;
             
             // 风险等级
-            const riskLevel = result.is_phish ? '高' : (result.confidence > 0.5 ? '中' : '低');
+            let riskLevel;
+            if (result.label === 'PHISHING') {
+                riskLevel = '高';
+            } else if (result.label === 'SUSPICIOUS') {
+                riskLevel = '中';
+            } else {
+                riskLevel = '低';
+            }
             document.getElementById('riskLevel').textContent = riskLevel;
             
             // 更新邮件信息
@@ -486,6 +500,171 @@
             
             // 显示云沙箱分析
             displaySandboxAnalysis(result.sandbox_analysis);
+            
+            // 显示模块评分
+            displayModuleScores(result.module_scores);
+            
+            // 显示评判标准
+            displayJudgmentCriteria();
+        }
+        
+        function displayJudgmentCriteria() {
+            const container = document.getElementById('judgmentCriteriaSection');
+            
+            let html = '<h6 class="mb-3">评判标准</h6>';
+            html += '<div class="accordion" id="judgmentCriteriaAccordion">';
+            
+            // 钓鱼邮件评判标准
+            html += `<div class="accordion-item">
+                <h2 class="accordion-header" id="headingPhishing">
+                    <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapsePhishing" aria-expanded="false" aria-controls="collapsePhishing">
+                        <span class="badge bg-danger me-2">钓鱼邮件</span> 判定标准
+                    </button>
+                </h2>
+                <div id="collapsePhishing" class="accordion-collapse collapse" aria-labelledby="headingPhishing" data-bs-parent="#judgmentCriteriaAccordion">
+                    <div class="accordion-body">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>危险值区域</th>
+                                    <th>危险程度说明</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>置信度 ≥ 0.7</td>
+                                    <td>邮件包含明确的钓鱼特征，如恶意链接、欺骗性发件人、可疑附件等</td>
+                                </tr>
+                                <tr>
+                                    <td>触发硬规则</td>
+                                    <td>沙箱检测到恶意代码、SPF/DKIM/DMARC全部失败且存在显示名欺骗、已知恶意URL等</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>`;
+            
+            // 可疑邮件评判标准
+            html += `<div class="accordion-item">
+                <h2 class="accordion-header" id="headingSuspicious">
+                    <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseSuspicious" aria-expanded="false" aria-controls="collapseSuspicious">
+                        <span class="badge bg-warning me-2">可疑邮件</span> 判定标准
+                    </button>
+                </h2>
+                <div id="collapseSuspicious" class="accordion-collapse collapse" aria-labelledby="headingSuspicious" data-bs-parent="#judgmentCriteriaAccordion">
+                    <div class="accordion-body">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>危险值区域</th>
+                                    <th>危险程度说明</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>0.4 ≤ 置信度 < 0.7</td>
+                                    <td>邮件包含一些可疑特征，但不足以确定为钓鱼邮件，需要进一步分析</td>
+                                </tr>
+                                <tr>
+                                    <td>部分风险指标</td>
+                                    <td>如短链接、新注册域名、认证部分失败等</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>`;
+            
+            // 正常邮件评判标准
+            html += `<div class="accordion-item">
+                <h2 class="accordion-header" id="headingNormal">
+                    <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseNormal" aria-expanded="false" aria-controls="collapseNormal">
+                        <span class="badge bg-success me-2">正常邮件</span> 判定标准
+                    </button>
+                </h2>
+                <div id="collapseNormal" class="accordion-collapse collapse" aria-labelledby="headingNormal" data-bs-parent="#judgmentCriteriaAccordion">
+                    <div class="accordion-body">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>危险值区域</th>
+                                    <th>危险程度说明</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>置信度 < 0.4</td>
+                                    <td>邮件未发现明显的钓鱼特征，各项指标正常</td>
+                                </tr>
+                                <tr>
+                                    <td>认证通过</td>
+                                    <td>SPF/DKIM/DMARC认证通过，发件人信息可信</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>`;
+            
+            html += '</div>';
+            container.innerHTML = html;
+        }
+        
+        function displayModuleScores(moduleScores) {
+            const container = document.getElementById('moduleScoresSection');
+            
+            if (!moduleScores) {
+                container.innerHTML = '<div class="alert alert-secondary"><i class="bi bi-bar-chart"></i> 无模块评分信息</div>';
+                return;
+            }
+            
+            const moduleNames = {
+                'header': '邮件头特征',
+                'url': 'URL特征',
+                'text': '文本特征',
+                'attachment': '附件特征',
+                'html': 'HTML特征'
+            };
+            
+            let html = '<h6 class="mb-3">模块评分</h6>';
+            html += '<div class="row">';
+            
+            for (const [module, score] of Object.entries(moduleScores)) {
+                const scorePercentage = Math.round(score * 100);
+                let color;
+                let riskLevel;
+                
+                if (scorePercentage >= 70) {
+                    color = 'bg-danger';
+                    riskLevel = '高风险';
+                } else if (scorePercentage >= 40) {
+                    color = 'bg-warning';
+                    riskLevel = '中等风险';
+                } else {
+                    color = 'bg-success';
+                    riskLevel = '低风险';
+                }
+                
+                html += `<div class="col-md-6 mb-3">
+                    <div class="card">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <strong>${moduleNames[module]}</strong>
+                                <span class="badge ${color}">${riskLevel}</span>
+                            </div>
+                            <div class="progress" style="height: 20px;">
+                                <div class="progress-bar ${color}" role="progressbar" style="width: ${scorePercentage}%" aria-valuenow="${scorePercentage}" aria-valuemin="0" aria-valuemax="100">
+                                    ${scorePercentage}%
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>`;
+            }
+            
+            html += '</div>';
+            container.innerHTML = html;
         }
 
         function generateReportId() {
@@ -495,20 +674,25 @@
             return `PHISH-${dateStr}-${randomStr}`;
         }
 
-        function updateSecurityScoreChart(confidence, isPhish) {
+        function updateSecurityScoreChart(confidence, isPhish, label) {
             const score = Math.round(confidence * 100);
             document.getElementById('securityScoreValue').textContent = score + '%';
             
             const badgeElement = document.getElementById('securityBadge');
-            if (isPhish) {
+            let color;
+            
+            if (label === 'PHISHING') {
                 badgeElement.className = 'security-badge badge-malicious';
-                badgeElement.innerHTML = '<i class="bi bi-exclamation-triangle-fill"></i> 恶意邮件';
-            } else if (confidence > 0.5) {
+                badgeElement.innerHTML = '<i class="bi bi-exclamation-triangle-fill"></i> 钓鱼邮件';
+                color = '#ef4444';
+            } else if (label === 'SUSPICIOUS') {
                 badgeElement.className = 'security-badge badge-suspicious';
                 badgeElement.innerHTML = '<i class="bi bi-exclamation-circle-fill"></i> 可疑邮件';
+                color = '#f59e0b';
             } else {
                 badgeElement.className = 'security-badge badge-safe';
-                badgeElement.innerHTML = '<i class="bi bi-check-circle-fill"></i> 安全邮件';
+                badgeElement.innerHTML = '<i class="bi bi-check-circle-fill"></i> 正常邮件';
+                color = '#10b981';
             }
             
             const ctx = document.getElementById('securityScoreChart').getContext('2d');
@@ -520,7 +704,7 @@
                     datasets: [{
                         data: [score, 100 - score],
                         backgroundColor: [
-                            isPhish ? '#ef4444' : (confidence > 0.5 ? '#f59e0b' : '#10b981'),
+                            color,
                             '#e5e7eb'
                         ],
                         borderWidth: 0

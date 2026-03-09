@@ -185,6 +185,26 @@ def parse_email(raw_email: str) -> Dict:
         except Exception:
             pass
 
+    # 从文本类型附件中提取 URL
+    for attachment in attachments:
+        content = attachment.get('content')
+        if content:
+            try:
+                # 尝试将附件内容解码为文本
+                if isinstance(content, bytes):
+                    attachment_text = content.decode('utf-8', errors='ignore')
+                else:
+                    attachment_text = str(content)
+                
+                # 提取 URL
+                attachment_urls = extract_urls_from_body(attachment_text)
+                # 添加到总 URL 列表
+                for url in attachment_urls:
+                    if url not in urls:
+                        urls.append(url)
+            except Exception:
+                pass
+
     # 提取邮件头信息
     headers = {
         'return_path': msg.get("Return-Path", ""),
@@ -388,8 +408,22 @@ def extract_urls_from_body(body: str) -> List[str]:
     Returns:
         List[str]: URL 列表
     """
-    url_pattern = r'https?://[^\s<>"\']+|www\.[^\s<>"\']+'
-    return list(set(re.findall(url_pattern, body)))
+    # 匹配三种类型的URL：
+    # 1. 以 http:// 或 https:// 开头的URL
+    # 2. 以 www. 开头的URL
+    # 3. 没有协议前缀但包含域名和路径的URL（如 zxcve.zncb.work/dingding）
+    url_pattern = r'https?://[^\s<>"]+|www\.[^\s<>"]+|[a-zA-Z0-9][-a-zA-Z0-9]{0,62}(\.[a-zA-Z0-9][-a-zA-Z0-9]{0,62})+(/[^\s<>"]*)?'
+    urls = list(set(re.findall(url_pattern, body)))
+    
+    # 为没有协议前缀的URL添加 http://
+    processed_urls = []
+    for url in urls:
+        if not url.startswith(('http://', 'https://', 'www.')):
+            processed_urls.append('http://' + url)
+        else:
+            processed_urls.append(url)
+    
+    return processed_urls
 
 
 def extract_emails_from_text(text: str) -> List[str]:

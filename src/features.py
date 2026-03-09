@@ -16,8 +16,8 @@ import whois
 import requests
 from urllib.parse import urlparse, parse_qs
 from typing import Dict, List, Optional
-from src.parse_email import parse_email
-from src.sandbox_analyzer import analyze_attachment
+from parse_email import parse_email
+from sandbox_analyzer import analyze_attachment
 
 
 # 可疑域名关键词列表 (可扩展)
@@ -342,7 +342,7 @@ def extract_attachment_features(parsed_email: Dict, vt_api_key: str = "") -> Dic
         vt_api_key: VirusTotal API 密钥
 
     Returns:
-        Dict: 包含 5 个附件特征的字典
+        Dict: 包含附件特征的字典
     """
     features = {
         'attachment_count': 0,
@@ -353,6 +353,7 @@ def extract_attachment_features(parsed_email: Dict, vt_api_key: str = "") -> Dic
         'sandbox_detected': 0,
         'max_sandbox_detection_ratio': 0.0,
         'has_sandbox_analysis': 0,
+        'attachment_risk_score': 0.0,  # 新增：附件风险评分 (0-10)
     }
 
     attachments = parsed_email.get('attachments', [])
@@ -366,6 +367,7 @@ def extract_attachment_features(parsed_email: Dict, vt_api_key: str = "") -> Dic
     max_detection_ratio = 0.0
     sandbox_analyzed = False
     sandbox_detected = False
+    attachment_risk = 0.0
     
     for att in attachments:
         filename = att.get('filename', '').lower()
@@ -377,17 +379,24 @@ def extract_attachment_features(parsed_email: Dict, vt_api_key: str = "") -> Dic
 
         if is_suspicious:
             features['has_suspicious_attachment'] = 1
+            attachment_risk += 5.0
 
         # 检查可执行文件类型
         ext = '.' + filename.rsplit('.', 1)[-1] if '.' in filename else ''
         if ext in ['.exe', '.bat', '.cmd', '.com', '.scr', '.vbs', '.js', '.ps1', '.msi', '.hta']:
             features['has_executable_attachment'] = 1
+            attachment_risk += 10.0  # 可执行文件风险最高
+        elif ext in ['.zip', '.rar', '.7z', '.tar', '.gz']:
+            attachment_risk += 3.0  # 压缩文件中等风险
+        elif ext in ['.pdf', '.doc', '.docx', '.xls', '.xlsx']:
+            attachment_risk += 1.0  # 文档文件低风险
 
         # 检查双重扩展名
         parts = filename.split('.')
         if len(parts) > 2:
             if parts[-2] in ['.pdf', '.doc', '.xls', '.jpg', '.png', '.txt', '.zip']:
                 features['has_double_extension'] = 1
+                attachment_risk += 7.0  # 双重扩展名风险较高
         
         # 沙箱分析
         if vt_api_key:
@@ -405,6 +414,8 @@ def extract_attachment_features(parsed_email: Dict, vt_api_key: str = "") -> Dic
     features['sandbox_detected'] = 1 if sandbox_detected else 0
     features['max_sandbox_detection_ratio'] = max_detection_ratio
     features['has_sandbox_analysis'] = 1 if sandbox_analyzed else 0
+    # 归一化附件风险评分到 0-10
+    features['attachment_risk_score'] = min(10.0, max(0.0, attachment_risk))
 
     return features
 
@@ -587,11 +598,12 @@ def vector_to_list(feature_vector: Dict) -> List[float]:
         'text_length', 'urgency_score', 'exclamation_count',
         'caps_ratio', 'url_count',
 
-        # 附件特征 (8 维)
+        # 附件特征 (9 维)
         'attachment_count', 'has_suspicious_attachment',
         'has_executable_attachment', 'total_attachment_size',
         'has_double_extension', 'sandbox_detected',
         'max_sandbox_detection_ratio', 'has_sandbox_analysis',
+        'attachment_risk_score',  # 新增：附件风险评分
 
         # HTML 特征 (6 维)
         'has_html_body', 'html_link_count', 'has_hidden_links',

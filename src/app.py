@@ -9,10 +9,10 @@ from datetime import datetime, timedelta
 from typing import Dict
 from flask import Flask, render_template, request, jsonify, send_from_directory
 from werkzeug.utils import secure_filename
-from src.parse_email import parse_email
-from src.features import build_feature_vector
-from src.detector import PhishingDetector
-from src.email_traceback import generate_traceback_report
+from parse_email import parse_email
+from features import build_feature_vector
+from detector import PhishingDetector, analyze_phishing_risk
+from email_traceback import generate_traceback_report
 
 
 # 初始化 Flask 应用
@@ -115,6 +115,15 @@ def init_db():
     conn = sqlite3.connect(DATABASE_PATH)
     cursor = conn.cursor()
 
+    # 检查是否存在旧表结构
+    cursor.execute("PRAGMA table_info(alerts)")
+    columns = [column[1] for column in cursor.fetchall()]
+
+    # 如果存在旧表结构且包含 is_phish 字段，删除旧表
+    if 'is_phish' in columns:
+        cursor.execute('DROP TABLE IF EXISTS alerts')
+
+    # 创建新表结构
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS alerts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -124,7 +133,7 @@ def init_db():
             to_addr TEXT,
             subject TEXT,
             detection_time TEXT,
-            is_phish BOOLEAN,
+            label TEXT,
             confidence REAL,
             source_ip TEXT,
             risk_indicators TEXT,
@@ -138,7 +147,7 @@ def init_db():
 
     # 创建索引以加快查询速度
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_detection_time ON alerts(detection_time)')
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_is_phish ON alerts(is_phish)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_label ON alerts(label)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_from_email ON alerts(from_email)')
 
     conn.commit()
@@ -236,14 +245,14 @@ def process_email(raw_email: str):
     # 提取特征
     features = build_feature_vector(parsed, vt_api_key, vt_api_url)
 
-    # 预测
-    is_phish, confidence = detector.predict(features)
+    # 分析（三分类）
+    label, confidence, reason = analyze_phishing_risk(parsed, features, vt_api_key=vt_api_key)
 
     # 生成溯源报告
     traceback_report = generate_traceback_report(parsed, vt_api_key, ip_api_url)
 
     # 保存到数据库
-    save_to_database(parsed, is_phish, confidence, traceback_report)
+    save_to_database(parsed, label, confidence, traceback_report)
 
     # 处理附件的沙箱分析结果
     attachments_with_analysis = []
@@ -254,11 +263,80 @@ def process_email(raw_email: str):
             del att_with_analysis['content']
         attachments_with_analysis.append(att_with_analysis)
 
+    # 移除 features 中可能包含的字节类型数据
+    safe_features = {}
+    for key, value in features.items():
+        if isinstance(value, bytes):
+            safe_features[key] = str(value)
+        else:
+            safe_features[key] = value
+
+    # 计算各模块评分
+    module_scores = {
+        'header': 0.0,
+        'url': 0.0,
+        'text': 0.0,
+        'attachment': 0.0,
+        'html': 0.0
+    }
+    
+    # 邮件头特征评分
+    header_features = [
+        'is_suspicious_from_domain', 'spf_fail', 'dkim_fail', 'dmarc_fail',
+        'from_display_name_mismatch', 'from_domain_in_subject'
+    ]
+    for feat in header_features:
+        if features.get(feat, 0):
+            module_scores['header'] += 0.2
+    
+    # URL特征评分
+    url_features = [
+        'ip_address_count', 'port_count', 'at_symbol_count', 'subdomain_count',
+        'suspicious_param_count', 'short_url_count'
+    ]
+    for feat in url_features:
+        if features.get(feat, 0) > 0:
+            module_scores['url'] += 0.167
+    
+    # 文本特征评分
+    text_features = [
+        'urgent_keywords_count', 'financial_keywords_count', 'exclamation_count',
+        'caps_ratio', 'urgency_score'
+    ]
+    for feat in text_features:
+        value = features.get(feat, 0)
+        if feat == 'urgency_score':
+            module_scores['text'] += value * 0.2
+        else:
+            if value > 0:
+                module_scores['text'] += 0.2
+    
+    # 附件特征评分
+    attachment_features = [
+        'has_suspicious_attachment', 'has_executable_attachment',
+        'has_double_extension', 'sandbox_detected'
+    ]
+    for feat in attachment_features:
+        if features.get(feat, 0):
+            module_scores['attachment'] += 0.25
+    
+    # HTML特征评分
+    html_features = [
+        'has_hidden_links', 'has_form', 'has_iframe', 'has_external_script'
+    ]
+    for feat in html_features:
+        if features.get(feat, 0):
+            module_scores['html'] += 0.25
+    
+    # 确保评分在0-1之间
+    for key in module_scores:
+        module_scores[key] = min(1.0, module_scores[key])
+    
     result = {
-        'is_phish': is_phish,
+        'label': label,
         'confidence': round(confidence, 4),
-        'threshold': detector.threshold,
-        'raw_email': raw_email,  # 返回原始邮件内容
+        'reason': reason,
+        'module_scores': module_scores,
         'parsed': {
             'from': parsed.get('from'),
             'from_display_name': parsed.get('from_display_name'),
@@ -272,7 +350,7 @@ def process_email(raw_email: str):
             'attachment_count': len(parsed.get('attachments', [])),
             'has_html_body': 1 if parsed.get('html_body') else 0
         },
-        'features': features,
+        'features': safe_features,
         'attachments': attachments_with_analysis,
         'html_links': parsed.get('html_links', []),
         'html_forms': parsed.get('html_forms', []),
@@ -294,7 +372,7 @@ def get_alerts():
     """获取所有告警记录"""
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 20, type=int)
-    is_phish_filter = request.args.get('is_phish', None)
+    label_filter = request.args.get('label', None)
 
     conn = sqlite3.connect(DATABASE_PATH)
     conn.row_factory = sqlite3.Row
@@ -306,11 +384,10 @@ def get_alerts():
 
     params = []
 
-    if is_phish_filter is not None:
-        is_phish_val = is_phish_filter.lower() == 'true'
-        base_query += " WHERE is_phish = ?"
-        count_query += " WHERE is_phish = ?"
-        params = [is_phish_val]
+    if label_filter is not None:
+        base_query += " WHERE label = ?"
+        count_query += " WHERE label = ?"
+        params = [label_filter]
 
     cursor.execute(count_query, params)
     total = cursor.fetchone()[0]
@@ -342,11 +419,15 @@ def get_overview_stats():
     total = cursor.fetchone()[0]
 
     # 钓鱼邮件数
-    cursor.execute("SELECT COUNT(*) FROM alerts WHERE is_phish = 1")
+    cursor.execute("SELECT COUNT(*) FROM alerts WHERE label = 'PHISHING'")
     phish_count = cursor.fetchone()[0]
 
+    # 可疑邮件数
+    cursor.execute("SELECT COUNT(*) FROM alerts WHERE label = 'SUSPICIOUS'")
+    suspicious_count = cursor.fetchone()[0]
+
     # 正常邮件数
-    cursor.execute("SELECT COUNT(*) FROM alerts WHERE is_phish = 0")
+    cursor.execute("SELECT COUNT(*) FROM alerts WHERE label = 'SAFE'")
     normal_count = cursor.fetchone()[0]
 
     # 今日新增
@@ -360,7 +441,9 @@ def get_overview_stats():
     cursor.execute("""
         SELECT date(detection_time) as day,
                COUNT(*) as count,
-               SUM(CASE WHEN is_phish = 1 THEN 1 ELSE 0 END) as phish_count
+               SUM(CASE WHEN label = 'PHISHING' THEN 1 ELSE 0 END) as phish_count,
+               SUM(CASE WHEN label = 'SUSPICIOUS' THEN 1 ELSE 0 END) as suspicious_count,
+               SUM(CASE WHEN label = 'SAFE' THEN 1 ELSE 0 END) as safe_count
         FROM alerts
         WHERE detection_time >= datetime('now', '-7 days')
         GROUP BY day
@@ -373,6 +456,7 @@ def get_overview_stats():
     return jsonify({
         'total': total,
         'phishing': phish_count,
+        'suspicious': suspicious_count,
         'normal': normal_count,
         'today': today_count,
         'trend': trend_data
@@ -391,8 +475,9 @@ def get_daily_stats():
         SELECT
             date(detection_time) as day,
             COUNT(*) as total,
-            SUM(CASE WHEN is_phish = 1 THEN 1 ELSE 0 END) as phishing,
-            SUM(CASE WHEN is_phish = 0 THEN 1 ELSE 0 END) as normal
+            SUM(CASE WHEN label = 'PHISHING' THEN 1 ELSE 0 END) as phishing,
+            SUM(CASE WHEN label = 'SUSPICIOUS' THEN 1 ELSE 0 END) as suspicious,
+            SUM(CASE WHEN label = 'SAFE' THEN 1 ELSE 0 END) as normal
         FROM alerts
         WHERE detection_time >= datetime('now', '-{} days')
         GROUP BY day
@@ -488,15 +573,24 @@ def test_api_connection():
         return jsonify({'status': 'error', 'message': f'测试失败: {str(e)}'}), 500
 
 
-def save_to_database(parsed: Dict, is_phish: bool, confidence: float,
+def save_to_database(parsed: Dict, label: str, confidence: float,
                      traceback_report: Dict):
     """保存检测结果到数据库（增强版）"""
     conn = sqlite3.connect(DATABASE_PATH)
     cursor = conn.cursor()
 
+    # 处理附件数据，移除字节类型的content字段
+    attachments = parsed.get('attachments', [])
+    safe_attachments = []
+    for att in attachments:
+        safe_att = {**att}
+        if 'content' in safe_att:
+            del safe_att['content']
+        safe_attachments.append(safe_att)
+
     cursor.execute('''
         INSERT INTO alerts (from_addr, from_display_name, from_email, to_addr, subject, detection_time,
-                           is_phish, confidence, source_ip, risk_indicators,
+                           label, confidence, source_ip, risk_indicators,
                            raw_email, traceback_data, attachment_data, url_data, header_data)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (
@@ -506,13 +600,13 @@ def save_to_database(parsed: Dict, is_phish: bool, confidence: float,
         parsed.get('to', ''),
         parsed.get('subject', ''),
         datetime.now().isoformat(),
-        is_phish,
+        label,
         confidence,
         traceback_report.get('email_source', {}).get('source_ip', ''),
         json.dumps(traceback_report.get('risk_indicators', [])),
         '',  # 为节省空间，实际应用中可能需要存储原始邮件
         json.dumps(traceback_report),
-        json.dumps(parsed.get('attachments', [])),
+        json.dumps(safe_attachments),
         json.dumps(parsed.get('urls', [])),
         json.dumps(parsed.get('headers', {}))
     ))
