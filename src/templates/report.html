@@ -1,0 +1,945 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>钓鱼邮件检测报告</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --primary-color: #2c3e50;
+            --secondary-color: #3498db;
+            --success-color: #10b981;
+            --danger-color: #ef4444;
+            --warning-color: #f59e0b;
+            --neutral-bg: #f9fafb;
+        }
+
+        body {
+            background-color: var(--neutral-bg);
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+        }
+
+        .navbar {
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+        }
+
+        .card {
+            border: none;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+            border-radius: 12px;
+        }
+
+        .card-header {
+            border-bottom: none;
+            background-color: #fff;
+            border-radius: 12px 12px 0 0;
+        }
+
+        .security-badge {
+            padding: 10px 20px;
+            border-radius: 25px;
+            font-weight: 600;
+            font-size: 1.1rem;
+            display: inline-block;
+        }
+
+        .badge-safe {
+            background-color: var(--success-color);
+            color: white;
+        }
+
+        .badge-suspicious {
+            background-color: var(--warning-color);
+            color: white;
+        }
+
+        .badge-malicious {
+            background-color: var(--danger-color);
+            color: white;
+        }
+
+        .progress-threshold {
+            position: relative;
+        }
+
+        .threshold-line {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 3px;
+            background-color: var(--warning-color);
+            z-index: 1;
+        }
+
+        .confidence-bar {
+            height: 40px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .risk-indicator {
+            padding: 10px 15px;
+            border-radius: 5px;
+            margin-bottom: 10px;
+            border-left: 4px solid;
+        }
+
+        .risk-high {
+            background-color: #fce4e4;
+            border-color: var(--danger-color);
+        }
+
+        .risk-medium {
+            background-color: #fff3cd;
+            border-color: var(--warning-color);
+        }
+
+        .risk-low {
+            background-color: #d4edda;
+            border-color: var(--success-color);
+        }
+
+        .feature-badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 15px;
+            font-size: 12px;
+            margin: 2px;
+        }
+
+        .feature-danger {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+
+        .feature-warning {
+            background-color: #fff3cd;
+            color: #856404;
+        }
+
+        .feature-success {
+            background-color: #d4edda;
+            color: #155724;
+        }
+
+        .attachment-card {
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 10px;
+            background: #f8f9fa;
+        }
+
+        .attachment-icon {
+            font-size: 2rem;
+            margin-right: 10px;
+        }
+
+        .url-card {
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 8px;
+            background: #fff;
+        }
+
+        .detail-table th {
+            width: 180px;
+            background-color: #f8f9fa;
+        }
+
+        .help-icon {
+            position: relative;
+            display: inline-block;
+            cursor: help;
+        }
+
+        .help-icon .tooltip {
+            visibility: hidden;
+            width: 200px;
+            background-color: #333;
+            color: #fff;
+            text-align: center;
+            border-radius: 6px;
+            padding: 8px;
+            position: absolute;
+            z-index: 1;
+            bottom: 125%;
+            left: 50%;
+            margin-left: -100px;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+
+        .help-icon:hover .tooltip {
+            visibility: visible;
+            opacity: 1;
+        }
+
+        .timeline {
+            position: relative;
+            padding: 20px 0;
+        }
+
+        .timeline::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            left: 20px;
+            width: 2px;
+            background: #dee2e6;
+        }
+
+        .timeline-item {
+            position: relative;
+            padding-left: 60px;
+            margin-bottom: 20px;
+        }
+
+        .timeline-item::before {
+            content: '';
+            position: absolute;
+            left: 12px;
+            top: 5px;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: var(--secondary-color);
+            border: 3px solid #fff;
+            box-shadow: 0 0 0 2px var(--secondary-color);
+        }
+
+        .timeline-item:last-child {
+            margin-bottom: 0;
+        }
+
+        @media (max-width: 768px) {
+            .detail-table {
+                display: block;
+                overflow-x: auto;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- 导航栏 -->
+    <nav class="navbar navbar-expand-lg navbar-dark">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="/">
+                <i class="bi bi-shield-check"></i>
+                钓鱼邮件检测与溯源系统
+            </a>
+            <div class="d-flex ms-auto">
+                <button class="btn btn-sm btn-outline-light me-2" type="button" onclick="window.location.href='/';">
+                    <i class="bi bi-house"></i> 返回首页
+                </button>
+                <button class="btn btn-sm btn-outline-light" type="button" onclick="exportReport()">
+                    <i class="bi bi-download"></i> 导出报告
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid">
+        <div class="row">
+            <!-- 主内容区 -->
+            <div class="col-md-12">
+                <!-- 报告头部 -->
+                <div class="card mt-4">
+                    <div class="card-header">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <h5 class="mb-0"><i class="bi bi-file-earmark-medical"></i> 钓鱼邮件检测报告</h5>
+                            <div>
+                                <span class="text-muted" id="report-info"></span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <!-- 概览仪表盘 -->
+                        <div class="row mb-4">
+                            <div class="col-md-6">
+                                <div class="text-center">
+                                    <h3 class="mb-3">安全评分</h3>
+                                    <div class="d-inline-block position-relative" style="width: 200px; height: 200px;">
+                                        <canvas id="securityScoreChart"></canvas>
+                                        <div class="position-absolute top-50 start-50 translate-middle">
+                                            <span id="securityScoreValue" class="fs-1 fw-bold"></span>
+                                        </div>
+                                    </div>
+                                    <div class="mt-3">
+                                        <span id="securityBadge" class="security-badge"></span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <h5 class="mb-3">检测信息</h5>
+                                <table class="table table-sm detail-table">
+                                    <tr><th>检测耗时:</th><td id="detectionTime"></td></tr>
+                                    <tr><th>检测时间:</th><td id="detectionTimestamp"></td></tr>
+                                    <tr><th>风险等级:</th><td id="riskLevel"></td></tr>
+                                    <tr><th>报告编号:</th><td id="reportId"></td></tr>
+                                </table>
+                                <div class="mt-4">
+                                    <button class="btn btn-primary" onclick="window.location.href='/';">
+                                        <i class="bi bi-arrow-left"></i> 再次检测
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 邮件基础信息 -->
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">
+                            <i class="bi bi-envelope"></i> 邮件基础信息
+                            <span class="help-icon ms-2">
+                                <i class="bi bi-question-circle"></i>
+                                <span class="tooltip">显示邮件的基本信息和认证状态</span>
+                            </span>
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <table class="table table-sm detail-table">
+                                    <tr><th>发件人显示名:</th><td id="resultFromName"></td></tr>
+                                    <tr><th>发件人邮箱:</th><td id="resultFromEmail"></td></tr>
+                                    <tr><th>收件人:</th><td id="resultTo"></td></tr>
+                                    <tr><th>主题:</th><td id="resultSubject"></td></tr>
+                                    <tr><th>URL 数量:</th><td id="resultUrlCount"></td></tr>
+                                    <tr><th>附件数量:</th><td id="resultAttachmentCount"></td></tr>
+                                </table>
+                            </div>
+                            <div class="col-md-6">
+                                <h6 class="mb-3"><i class="bi bi-shield-lock"></i> 认证状态</h6>
+                                <div id="authStatus"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 链接与附件分析 -->
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">
+                            <i class="bi bi-link-45deg"></i> 链接与附件分析
+                            <span class="help-icon ms-2">
+                                <i class="bi bi-question-circle"></i>
+                                <span class="tooltip">分析邮件中的链接和附件安全性</span>
+                            </span>
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <!-- URL 分析 -->
+                        <div id="urlAnalysisSection" class="mb-4"></div>
+                        
+                        <!-- 附件分析 -->
+                        <div id="attachmentsSection"></div>
+                    </div>
+                </div>
+
+                <!-- 云沙箱分析 -->
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">
+                            <i class="bi bi-cloud-check"></i> 云沙箱分析
+                            <span class="help-icon ms-2">
+                                <i class="bi bi-question-circle"></i>
+                                <span class="tooltip">通过 VirusTotal 等云服务对附件进行动态分析</span>
+                            </span>
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="sandboxAnalysisSection"></div>
+                    </div>
+                </div>
+
+                <!-- 技术特征分析 -->
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">
+                            <i class="bi bi-bar-chart"></i> 技术特征分析
+                            <span class="help-icon ms-2">
+                                <i class="bi bi-question-circle"></i>
+                                <span class="tooltip">分析邮件的技术特征和风险指标</span>
+                            </span>
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <!-- 风险指标 -->
+                        <div id="riskIndicators" class="mb-4"></div>
+                        
+                        <!-- 特征分析 -->
+                        <div id="featureAnalysisSection"></div>
+                    </div>
+                </div>
+
+                <!-- 溯源路径可视化 -->
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">
+                            <i class="bi bi-map"></i> 溯源路径可视化
+                            <span class="help-icon ms-2">
+                                <i class="bi bi-question-circle"></i>
+                                <span class="tooltip">显示邮件的传输路径和来源信息</span>
+                            </span>
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="tracebackInfo"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let securityScoreChart = null;
+        let currentResult = null;
+
+        document.addEventListener('DOMContentLoaded', function() {
+            loadReportData();
+        });
+
+        function loadReportData() {
+            // 从URL参数或localStorage获取数据
+            const urlParams = new URLSearchParams(window.location.search);
+            const sessionId = urlParams.get('session');
+            
+            if (sessionId) {
+                // 从localStorage获取数据
+                const storedData = localStorage.getItem(`phishing_report_${sessionId}`);
+                if (storedData) {
+                    currentResult = JSON.parse(storedData);
+                    displayReport(currentResult);
+                } else {
+                    alert('报告数据不存在');
+                    window.location.href = '/';
+                }
+            } else {
+                alert('缺少报告会话ID');
+                window.location.href = '/';
+            }
+        }
+
+        function displayReport(result) {
+            // 生成报告编号
+            const reportId = generateReportId();
+            document.getElementById('reportId').textContent = reportId;
+            
+            // 设置报告信息
+            const timestamp = new Date().toLocaleString();
+            document.getElementById('report-info').textContent = `报告编号：${reportId} | 生成时间：${timestamp}`;
+            
+            // 安全评分图表
+            updateSecurityScoreChart(result.confidence, result.is_phish);
+            
+            // 检测信息
+            document.getElementById('detectionTime').textContent = result.detection_time || '未知';
+            document.getElementById('detectionTimestamp').textContent = timestamp;
+            
+            // 风险等级
+            const riskLevel = result.is_phish ? '高' : (result.confidence > 0.5 ? '中' : '低');
+            document.getElementById('riskLevel').textContent = riskLevel;
+            
+            // 更新邮件信息
+            document.getElementById('resultFromName').textContent = result.parsed.from_display_name || '-';
+            document.getElementById('resultFromEmail').textContent = result.parsed.from_email || '-';
+            document.getElementById('resultTo').textContent = result.parsed.to || '-';
+            document.getElementById('resultSubject').textContent = result.parsed.subject || '-';
+            document.getElementById('resultUrlCount').textContent = result.parsed.url_count || 0;
+            document.getElementById('resultAttachmentCount').innerHTML =
+                result.parsed.attachment_count > 0
+                    ? `<span class="badge bg-warning">${result.parsed.attachment_count}</span>`
+                    : '0';
+            
+            // 显示认证状态
+            displayAuthStatus(result.headers);
+            
+            // 显示风险指标
+            displayRiskIndicators(result.traceback?.risk_indicators || [], result.features);
+            
+            // 显示附件分析
+            displayAttachments(result.attachments || []);
+            
+            // 显示 URL 分析
+            displayURLAnalysis(result.traceback?.url_analysis || [], result.html_links || []);
+            
+            // 显示特征分析
+            displayFeatureAnalysis(result.features);
+            
+            // 显示溯源信息
+            displayTracebackInfo(result.traceback);
+            
+            // 显示云沙箱分析
+            displaySandboxAnalysis(result.sandbox_analysis);
+        }
+
+        function generateReportId() {
+            const date = new Date();
+            const dateStr = date.toISOString().slice(0, 10).replace(/-/g, '');
+            const randomStr = Math.random().toString(36).substring(2, 10).toUpperCase();
+            return `PHISH-${dateStr}-${randomStr}`;
+        }
+
+        function updateSecurityScoreChart(confidence, isPhish) {
+            const score = Math.round(confidence * 100);
+            document.getElementById('securityScoreValue').textContent = score + '%';
+            
+            const badgeElement = document.getElementById('securityBadge');
+            if (isPhish) {
+                badgeElement.className = 'security-badge badge-malicious';
+                badgeElement.innerHTML = '<i class="bi bi-exclamation-triangle-fill"></i> 恶意邮件';
+            } else if (confidence > 0.5) {
+                badgeElement.className = 'security-badge badge-suspicious';
+                badgeElement.innerHTML = '<i class="bi bi-exclamation-circle-fill"></i> 可疑邮件';
+            } else {
+                badgeElement.className = 'security-badge badge-safe';
+                badgeElement.innerHTML = '<i class="bi bi-check-circle-fill"></i> 安全邮件';
+            }
+            
+            const ctx = document.getElementById('securityScoreChart').getContext('2d');
+            if (securityScoreChart) securityScoreChart.destroy();
+            
+            securityScoreChart = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    datasets: [{
+                        data: [score, 100 - score],
+                        backgroundColor: [
+                            isPhish ? '#ef4444' : (confidence > 0.5 ? '#f59e0b' : '#10b981'),
+                            '#e5e7eb'
+                        ],
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    cutout: '75%',
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: {
+                            display: false
+                        }
+                    }
+                }
+            });
+        }
+
+        function displayAuthStatus(headers) {
+            const container = document.getElementById('authStatus');
+            if (!headers) {
+                container.innerHTML = '<span class="text-muted">无认证信息</span>';
+                return;
+            }
+
+            const spf = headers.spf_result || 'unknown';
+            const dkim = headers.dkim_result || 'unknown';
+            const dmarc = headers.dmarc_result || 'unknown';
+
+            const getStatusBadge = (status) => {
+                if (status === 'pass') return '<span class="feature-badge feature-success">通过</span>';
+                if (status === 'fail') return '<span class="feature-badge feature-danger">失败</span>';
+                if (status === 'none') return '<span class="feature-badge feature-warning">未设置</span>';
+                return '<span class="feature-badge feature-warning">未知</span>';
+            };
+
+            container.innerHTML = `
+                <div class="mb-2">
+                    <strong>SPF:</strong> ${getStatusBadge(spf)}
+                    <small class="text-muted ms-2">验证发件人 IP 是否被授权</small>
+                </div>
+                <div class="mb-2">
+                    <strong>DKIM:</strong> ${getStatusBadge(dkim)}
+                    <small class="text-muted ms-2">验证邮件内容是否被篡改</small>
+                </div>
+                <div class="mb-2">
+                    <strong>DMARC:</strong> ${getStatusBadge(dmarc)}
+                    <small class="text-muted ms-2">综合认证策略</small>
+                </div>
+            `;
+        }
+
+        function displayRiskIndicators(indicators, features) {
+            const container = document.getElementById('riskIndicators');
+
+            // 根据特征生成额外风险指标
+            let dynamicIndicators = [...indicators];
+
+            // 检查附件风险
+            if (features?.has_executable_attachment) {
+                dynamicIndicators.push({
+                    type: 'EXECUTABLE_ATTACHMENT',
+                    description: '邮件包含可执行文件附件（.exe, .bat, .scr 等）',
+                    severity: 'high'
+                });
+            }
+            if (features?.has_double_extension) {
+                dynamicIndicators.push({
+                    type: 'DOUBLE_EXTENSION',
+                    description: '发现双重扩展名文件（如.pdf.exe），高度可疑',
+                    severity: 'high'
+                });
+            }
+
+            // 检查 URL 风险
+            if (features?.ip_address_count > 0) {
+                dynamicIndicators.push({
+                    type: 'IP_ADDRESS_URL',
+                    description: `发现 ${features.ip_address_count} 个使用 IP 地址的 URL`,
+                    severity: 'high'
+                });
+            }
+            if (features?.short_url_count > 0) {
+                dynamicIndicators.push({
+                    type: 'SHORT_URL',
+                    description: `发现 ${features.short_url_count} 个短链接`,
+                    severity: 'medium'
+                });
+            }
+            if (features?.has_hidden_links) {
+                dynamicIndicators.push({
+                    type: 'HIDDEN_LINKS',
+                    description: 'HTML 邮件中包含隐藏链接',
+                    severity: 'high'
+                });
+            }
+            if (features?.has_form) {
+                dynamicIndicators.push({
+                    type: 'FORM_IN_EMAIL',
+                    description: '邮件中包含表单（可能用于窃取凭证）',
+                    severity: 'high'
+                });
+            }
+
+            if (dynamicIndicators.length === 0) {
+                container.innerHTML = '<div class="alert alert-success"><i class="bi bi-shield-check"></i> 未发现明显风险指标</div>';
+                return;
+            }
+
+            // 去重
+            const seen = new Set();
+            const uniqueIndicators = dynamicIndicators.filter(ind => {
+                if (seen.has(ind.description)) return false;
+                seen.add(ind.description);
+                return true;
+            });
+
+            let html = '<h6 class="mb-3">风险指标</h6>';
+            uniqueIndicators.forEach(ind => {
+                const severityClass = ind.severity === 'high' ? 'risk-high' :
+                                     ind.severity === 'medium' ? 'risk-medium' : 'risk-low';
+                html += `<div class="risk-indicator ${severityClass}">
+                    <strong>[${(ind.severity || '').toUpperCase()}]</strong> ${ind.description}
+                </div>`;
+            });
+            container.innerHTML = html;
+        }
+
+        function displayAttachments(attachments) {
+            const container = document.getElementById('attachmentsSection');
+
+            if (!attachments || attachments.length === 0) {
+                container.innerHTML = '<div class="alert alert-secondary"><i class="bi bi-file-earmark"></i> 未发现附件</div>';
+                return;
+            }
+
+            let html = '<h6 class="mb-3">附件分析</h6>';
+
+            attachments.forEach((att, idx) => {
+                const isSuspicious = att.is_suspicious_type;
+                const ext = att.filename.split('.').pop()?.toLowerCase() || '';
+
+                // 根据文件类型选择图标
+                let icon = 'bi-file-earmark';
+                if (['exe', 'bat', 'cmd', 'scr', 'msi'].includes(ext)) icon = 'bi-file-earmark-lock';
+                else if (['doc', 'docm', 'xls', 'xlsm'].includes(ext)) icon = 'bi-file-earmark-word';
+                else if (['pdf'].includes(ext)) icon = 'bi-file-earmark-pdf';
+                else if (['jpg', 'jpeg', 'png', 'gif'].includes(ext)) icon = 'bi-file-earmark-image';
+                else if (['zip', 'rar', '7z'].includes(ext)) icon = 'bi-file-earmark-zip';
+
+                html += `<div class="attachment-card ${isSuspicious ? 'border-danger' : ''}">
+                    <div class="d-flex align-items-start">
+                        <i class="bi ${icon} attachment-icon ${isSuspicious ? 'text-danger' : 'text-secondary'}"></i>
+                        <div class="flex-grow-1">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <strong>${att.filename}</strong>
+                                ${isSuspicious ? '<span class="badge bg-danger">可疑</span>' : '<span class="badge bg-success">安全</span>'}
+                            </div>
+                            <div class="row mt-2">
+                                <div class="col-md-3"><small><strong>类型:</strong> ${att.content_type}</small></div>
+                                <div class="col-md-2"><small><strong>大小:</strong> ${(att.size / 1024).toFixed(2)} KB</small></div>
+                                <div class="col-md-7"><small><strong>MD5:</strong> <code>${att.md5 || 'N/A'}</code></small></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>`;
+            });
+
+            container.innerHTML = html;
+        }
+
+        function displayURLAnalysis(urlAnalysis, htmlLinks) {
+            const container = document.getElementById('urlAnalysisSection');
+
+            const allUrls = [...(urlAnalysis || [])];
+
+            if (allUrls.length === 0) {
+                container.innerHTML = '<div class="alert alert-secondary"><i class="bi bi-link-45deg"></i> 未发现 URL</div>';
+                return;
+            }
+
+            let html = '<h6 class="mb-3">URL 分析</h6>';
+
+            allUrls.forEach((urlInfo, idx) => {
+                const url = urlInfo.url || urlInfo;
+                const risks = urlInfo.risks || [];
+                const domainInfo = urlInfo.domain_info || {};
+
+                // 判断风险等级
+                let riskClass = 'border-success';
+                let riskBadge = '<span class="badge bg-success">安全</span>';
+                if (risks.length > 0) {
+                    const hasHighRisk = risks.some(r => r.severity === 'high');
+                    riskClass = hasHighRisk ? 'border-danger' : 'border-warning';
+                    riskBadge = hasHighRisk ? '<span class="badge bg-danger">高风险</span>' : '<span class="badge bg-warning text-dark">中等风险</span>';
+                }
+
+                html += `<div class="url-card ${riskClass}">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <code>${url}</code>
+                        ${riskBadge}
+                    </div>`;
+
+                // 域名信息
+                if (domainInfo && domainInfo.domain) {
+                    html += `<div class="row">
+                        <div class="col-md-3"><small><strong>域名:</strong> ${domainInfo.domain}</small></div>
+                        <div class="col-md-3"><small><strong>域名年龄:</strong> ${domainInfo.age_days || 0} 天</small></div>
+                        <div class="col-md-3"><small><strong>注册商:</strong> ${domainInfo.registrar || '未知'}</small></div>
+                        <div class="col-md-3"><small><strong>HTTPS:</strong> ${urlInfo.url?.startsWith('https') ? '是' : '否'}</small></div>
+                    </div>`;
+                }
+
+                // 跳转链
+                if (urlInfo.redirect_chain && urlInfo.redirect_chain.length > 1) {
+                    html += `<div class="mt-2"><small><strong>跳转路径:</strong> ${urlInfo.redirect_chain.join(' → ')}</small></div>`;
+                }
+
+                // 风险提示
+                if (risks.length > 0) {
+                    html += '<div class="mt-2">';
+                    risks.forEach(risk => {
+                        const badgeClass = risk.severity === 'high' ? 'bg-danger' : 'bg-warning';
+                        html += `<span class="badge ${badgeClass} me-1">${risk.description}</span>`;
+                    });
+                    html += '</div>';
+                }
+
+                html += '</div>';
+            });
+
+            // 显示 HTML 中的表单
+            if (htmlLinks && htmlLinks.length > 0) {
+                const forms = htmlLinks.filter(l => l.type === 'form' || (l.action && l.method));
+                if (forms.length > 0) {
+                    html += '<div class="alert alert-warning mt-3"><i class="bi bi-exclamation-triangle"></i> <strong>警告:</strong> 邮件中包含表单，可能用于窃取敏感信息</div>';
+                }
+            }
+
+            container.innerHTML = html;
+        }
+
+        function displayFeatureAnalysis(features) {
+            const container = document.getElementById('featureAnalysisSection');
+            if (!features) return;
+
+            let html = '<h6 class="mb-3">特征分析</h6>';
+            html += '<div class="row">';
+
+            // 邮件头特征
+            html += '<div class="col-md-4"><div class="card"><div class="card-header bg-light"><strong>邮件头特征</strong></div><div class="card-body">';
+            html += `<div class="d-flex justify-content-between"><span>可疑发件人域名:</span> ${features.is_suspicious_from_domain ? '<span class="badge bg-danger">是</span>' : '<span class="badge bg-success">否</span>'}</div>`;
+            html += `<div class="d-flex justify-content-between"><span>Received 跳数:</span> <span>${features.received_hops_count || 0}</span></div>`;
+            html += `<div class="d-flex justify-content-between"><span>SPF 失败:</span> ${features.spf_fail ? '<span class="badge bg-danger">是</span>' : '<span class="badge bg-success">否</span>'}</div>`;
+            html += `<div class="d-flex justify-content-between"><span>显示名不匹配:</span> ${features.from_display_name_mismatch ? '<span class="badge bg-danger">是</span>' : '<span class="badge bg-success">否</span>'}</div>`;
+            html += '</div></div></div>';
+
+            // URL 特征
+            html += '<div class="col-md-4"><div class="card"><div class="card-header bg-light"><strong>URL 特征</strong></div><div class="card-body">';
+            html += `<div class="d-flex justify-content-between"><span>URL 总数:</span> <span>${features.url_count || 0}</span></div>`;
+            html += `<div class="d-flex justify-content-between"><span>短链接:</span> ${features.short_url_count > 0 ? `<span class="badge bg-warning">${features.short_url_count}</span>` : '<span class="badge bg-success">0</span>'}</div>`;
+            html += `<div class="d-flex justify-content-between"><span>IP 地址 URL:</span> ${features.ip_address_count > 0 ? `<span class="badge bg-danger">${features.ip_address_count}</span>` : '<span class="badge bg-success">0</span>'}</div>`;
+            html += `<div class="d-flex justify-content-between"><span>平均域名年龄:</span> <span>${(features.avg_domain_age_days / 365).toFixed(1)} 年</span></div>`;
+            html += '</div></div></div>';
+
+            // 文本特征
+            html += '<div class="col-md-4"><div class="card"><div class="card-header bg-light"><strong>文本特征</strong></div><div class="card-body">';
+            html += `<div class="d-flex justify-content-between"><span>紧急关键词:</span> <span>${features.urgent_keywords_count || 0}</span></div>`;
+            html += `<div class="d-flex justify-content-between"><span>金融关键词:</span> <span>${features.financial_keywords_count || 0}</span></div>`;
+            html += `<div class="d-flex justify-content-between"><span>感叹号:</span> <span>${features.exclamation_count || 0}</span></div>`;
+            html += `<div class="d-flex justify-content-between"><span>紧迫感评分:</span> <span>${((features.urgency_score || 0) * 100).toFixed(0)}%</span></div>`;
+            html += '</div></div></div>';
+
+            // 附件特征
+            html += '</div><div class="row mt-3"><div class="col-md-6"><div class="card"><div class="card-header bg-light"><strong>附件特征</strong></div><div class="card-body">';
+            html += `<div class="d-flex justify-content-between"><span>附件数量:</span> <span>${features.attachment_count || 0}</span></div>`;
+            html += `<div class="d-flex justify-content-between"><span>可疑附件:</span> ${features.has_suspicious_attachment ? '<span class="badge bg-danger">是</span>' : '<span class="badge bg-success">否</span>'}</div>`;
+            html += `<div class="d-flex justify-content-between"><span>可执行文件:</span> ${features.has_executable_attachment ? '<span class="badge bg-danger">是</span>' : '<span class="badge bg-success">否</span>'}</div>`;
+            html += `<div class="d-flex justify-content-between"><span>双重扩展名:</span> ${features.has_double_extension ? '<span class="badge bg-danger">是</span>' : '<span class="badge bg-success">否</span>'}</div>`;
+            html += '</div></div></div>';
+
+            // HTML 特征
+            html += '<div class="col-md-6"><div class="card"><div class="card-header bg-light"><strong>HTML 特征</strong></div><div class="card-body">';
+            html += `<div class="d-flex justify-content-between"><span>HTML 正文:</span> ${features.has_html_body ? '<span class="badge bg-info">有</span>' : '<span class="badge bg-secondary">无</span>'}</div>`;
+            html += `<div class="d-flex justify-content-between"><span>HTML 链接数:</span> <span>${features.html_link_count || 0}</span></div>`;
+            html += `<div class="d-flex justify-content-between"><span>隐藏链接:</span> ${features.has_hidden_links ? '<span class="badge bg-danger">有</span>' : '<span class="badge bg-success">无</span>'}</div>`;
+            html += `<div class="d-flex justify-content-between"><span>表单:</span> ${features.has_form ? '<span class="badge bg-warning">有</span>' : '<span class="badge bg-success">无</span>'}</div>`;
+            html += `<div class="d-flex justify-content-between"><span>IFrame:</span> ${features.has_iframe ? '<span class="badge bg-warning">有</span>' : '<span class="badge bg-success">无</span>'}</div>`;
+            html += '</div></div></div></div>';
+
+            container.innerHTML = html;
+        }
+
+        function displayTracebackInfo(traceback) {
+            const container = document.getElementById('tracebackInfo');
+            const emailSource = traceback?.email_source || {};
+
+            if (!emailSource.source_ip && (!emailSource.hops || emailSource.hops.length === 0)) {
+                container.innerHTML = '<div class="alert alert-secondary"><i class="bi bi-map"></i> 无溯源信息</div>';
+                return;
+            }
+
+            let html = '<h6 class="mb-3">邮件来源</h6>';
+            html += '<div class="card mb-3"><div class="card-body">';
+            html += `<p class="mb-1"><strong>源 IP:</strong> ${emailSource.source_ip || '未知'}</p>`;
+
+            if (emailSource.full_path) {
+                html += `<p class="mb-1"><strong>传输路径:</strong> <code>${emailSource.full_path}</code></p>`;
+            }
+
+            const geo = emailSource.geolocation || {};
+            if (geo.country && geo.country !== 'Unknown') {
+                html += `<p class="mb-1"><strong>地理位置:</strong> ${geo.country} ${geo.regionName || ''} ${geo.city || ''}</p>`;
+                html += `<p class="mb-0"><strong>ISP:</strong> ${geo.isp || '未知'}</p>`;
+            }
+
+            const blacklist = emailSource.blacklist_check || {};
+            if (blacklist.is_blacklisted) {
+                html += `<p class="text-danger mb-0"><i class="bi bi-exclamation-triangle"></i> <strong>黑名单:</strong> 被标记于 ${blacklist.blacklists?.join(', ') || '未知'}</p>`;
+            } else {
+                html += `<p class="text-success mb-0"><i class="bi bi-check-circle"></i> <strong>黑名单:</strong> 未被标记</p>`;
+            }
+            html += '</div></div>';
+
+            // 时间轴展示传输路径
+            if (emailSource.hops && emailSource.hops.length > 0) {
+                html += '<h6 class="mb-3">传输路径时间轴</h6>';
+                html += '<div class="timeline">';
+                
+                emailSource.hops.forEach((hop, index) => {
+                    html += `<div class="timeline-item">
+                        <div class="timeline-content">
+                            <h6> hop ${index + 1}</h6>
+                            <p><strong>IP:</strong> ${hop.ip || '未知'}</p>
+                            <p><strong>主机名:</strong> ${hop.hostname || '未知'}</p>
+                            <p><strong>时间:</strong> ${hop.timestamp || '未知'}</p>
+                        </div>
+                    </div>`;
+                });
+                
+                html += '</div>';
+            }
+
+            container.innerHTML = html;
+        }
+
+        function displaySandboxAnalysis(sandboxAnalysis) {
+            const container = document.getElementById('sandboxAnalysisSection');
+
+            if (!sandboxAnalysis) {
+                container.innerHTML = '<div class="alert alert-secondary"><i class="bi bi-cloud-slash"></i> 无沙箱分析信息</div>';
+                return;
+            }
+
+            if (!sandboxAnalysis.enabled) {
+                container.innerHTML = '<div class="alert alert-warning"><i class="bi bi-exclamation-circle"></i> 沙箱分析未启用，请在 API 配置中设置 VirusTotal API Key</div>';
+                return;
+            }
+
+            if (!sandboxAnalysis.has_sandbox_analysis) {
+                container.innerHTML = '<div class="alert alert-info"><i class="bi bi-info-circle"></i> 未进行沙箱分析（无高风险附件或文件大小超过限制）</div>';
+                return;
+            }
+
+            let html = '<h6 class="mb-3">沙箱分析结果</h6>';
+
+            // 沙箱分析状态
+            const detected = sandboxAnalysis.sandbox_detected;
+            const detectionRatio = sandboxAnalysis.max_detection_ratio;
+
+            html += `<div class="card mb-4">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h6 class="card-title">分析状态</h6>
+                        <span class="badge ${detected ? 'bg-danger' : 'bg-success'}">
+                            ${detected ? '恶意' : '安全'}
+                        </span>
+                    </div>
+                    <div class="mb-3">
+                        <strong>检测率:</strong> ${(detectionRatio * 100).toFixed(2)}%
+                    </div>
+                    <div class="mb-3">
+                        <strong>分析服务:</strong> VirusTotal
+                    </div>
+                    <div class="mb-0">
+                        <strong>分析类型:</strong> 动态行为分析
+                    </div>
+                </div>
+            </div>`;
+
+            // 风险说明
+            if (detected) {
+                html += '<div class="alert alert-danger"><i class="bi bi-exclamation-triangle"></i> <strong>警告:</strong> 沙箱检测到恶意行为，该附件可能包含恶意代码。</div>';
+            } else {
+                html += '<div class="alert alert-success"><i class="bi bi-check-circle"></i> <strong>安全:</strong> 沙箱未检测到恶意行为。</div>';
+            }
+
+            container.innerHTML = html;
+        }
+
+        function exportReport() {
+            if (!currentResult) return;
+
+            const report = {
+                report_id: document.getElementById('reportId').textContent,
+                detection_time: new Date().toISOString(),
+                result: currentResult
+            };
+
+            const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `phishing_report_${report.report_id}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+    </script>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

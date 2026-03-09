@@ -8,6 +8,7 @@
 - URL 特征（15 维）：新增 IP 地址检测、端口检测、可疑参数、URL 长度等
 - 文本特征（7 维）：保持原有特征
 - 附件特征（5 维）：附件数量、可疑类型、大小等
+- 沙箱分析特征（3 维）：沙箱检测结果、检测率、分析状态
 """
 import time
 import re
@@ -15,7 +16,8 @@ import whois
 import requests
 from urllib.parse import urlparse, parse_qs
 from typing import Dict, List, Optional
-from parse_email import parse_email
+from src.parse_email import parse_email
+from src.sandbox_analyzer import analyze_attachment
 
 
 # 可疑域名关键词列表 (可扩展)
@@ -331,9 +333,13 @@ def extract_text_features(body: str, subject: str = "") -> Dict:
     return features
 
 
-def extract_attachment_features(parsed_email: Dict) -> Dict:
+def extract_attachment_features(parsed_email: Dict, vt_api_key: str = "") -> Dict:
     """
     提取附件特征。
+
+    Args:
+        parsed_email: 解析后的邮件数据
+        vt_api_key: VirusTotal API 密钥
 
     Returns:
         Dict: 包含 5 个附件特征的字典
@@ -344,6 +350,9 @@ def extract_attachment_features(parsed_email: Dict) -> Dict:
         'has_executable_attachment': 0,
         'total_attachment_size': 0,
         'has_double_extension': 0,
+        'sandbox_detected': 0,
+        'max_sandbox_detection_ratio': 0.0,
+        'has_sandbox_analysis': 0,
     }
 
     attachments = parsed_email.get('attachments', [])
@@ -354,6 +363,10 @@ def extract_attachment_features(parsed_email: Dict) -> Dict:
     features['attachment_count'] = len(attachments)
 
     total_size = 0
+    max_detection_ratio = 0.0
+    sandbox_analyzed = False
+    sandbox_detected = False
+    
     for att in attachments:
         filename = att.get('filename', '').lower()
         content_type = att.get('content_type', '').lower()
@@ -375,8 +388,23 @@ def extract_attachment_features(parsed_email: Dict) -> Dict:
         if len(parts) > 2:
             if parts[-2] in ['.pdf', '.doc', '.xls', '.jpg', '.png', '.txt', '.zip']:
                 features['has_double_extension'] = 1
+        
+        # 沙箱分析
+        if vt_api_key:
+            sandbox_result = analyze_attachment(att, vt_api_key)
+            if sandbox_result.get('analyzed'):
+                sandbox_analyzed = True
+                analysis_result = sandbox_result.get('result', {})
+                if analysis_result.get('detected'):
+                    sandbox_detected = True
+                detection_ratio = analysis_result.get('detection_ratio', 0.0)
+                if detection_ratio > max_detection_ratio:
+                    max_detection_ratio = detection_ratio
 
     features['total_attachment_size'] = total_size
+    features['sandbox_detected'] = 1 if sandbox_detected else 0
+    features['max_sandbox_detection_ratio'] = max_detection_ratio
+    features['has_sandbox_analysis'] = 1 if sandbox_analyzed else 0
 
     return features
 
@@ -516,8 +544,8 @@ def build_feature_vector(parsed_email: Dict, vt_api_key: str = "", vt_api_url: s
     subject = parsed_email.get('subject', '')
     text_features = extract_text_features(body + html_body, subject)
 
-    # 附件特征
-    attachment_features = extract_attachment_features(parsed_email)
+    # 附件特征（包含沙箱分析）
+    attachment_features = extract_attachment_features(parsed_email, vt_api_key)
 
     # HTML 特征
     html_features = extract_html_features(parsed_email)
@@ -559,14 +587,15 @@ def vector_to_list(feature_vector: Dict) -> List[float]:
         'text_length', 'urgency_score', 'exclamation_count',
         'caps_ratio', 'url_count',
 
-        # 附件特征 (5 维)
+        # 附件特征 (8 维)
         'attachment_count', 'has_suspicious_attachment',
         'has_executable_attachment', 'total_attachment_size',
-        'has_double_extension',
+        'has_double_extension', 'sandbox_detected',
+        'max_sandbox_detection_ratio', 'has_sandbox_analysis',
 
-        # HTML 特征 (5 维)
+        # HTML 特征 (6 维)
         'has_html_body', 'html_link_count', 'has_hidden_links',
-        'has_form', 'has_iframe',
+        'has_form', 'has_iframe', 'has_external_script',
     ]
 
     return [float(feature_vector.get(col, 0)) for col in FEATURE_COLUMNS]

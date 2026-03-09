@@ -9,7 +9,7 @@ from typing import Dict, List, Tuple, Optional
 import numpy as np
 
 
-# 特征列顺序 (与 features.py 中保持一致) - 增强版 39 维
+# 特征列顺序 (与 features.py 中保持一致) - 增强版 44 维
 FEATURE_COLUMNS = [
     # 邮件头特征 (8 维)
     'is_suspicious_from_domain', 'received_hops_count',
@@ -30,14 +30,15 @@ FEATURE_COLUMNS = [
     'text_length', 'urgency_score', 'exclamation_count',
     'caps_ratio', 'url_count',
 
-    # 附件特征 (5 维)
+    # 附件特征 (8 维)
     'attachment_count', 'has_suspicious_attachment',
     'has_executable_attachment', 'total_attachment_size',
-    'has_double_extension',
+    'has_double_extension', 'sandbox_detected',
+    'max_sandbox_detection_ratio', 'has_sandbox_analysis',
 
-    # HTML 特征 (5 维)
+    # HTML 特征 (6 维)
     'has_html_body', 'html_link_count', 'has_hidden_links',
-    'has_form', 'has_iframe',
+    'has_form', 'has_iframe', 'has_external_script',
 ]
 
 # 默认预测阈值
@@ -64,6 +65,9 @@ class PhishingDetector:
 
         if model_path and os.path.exists(model_path):
             self.load_model()
+        else:
+            # 生成演示模型
+            self.generate_demo_model()
 
     def load_model(self) -> bool:
         """
@@ -72,6 +76,15 @@ class PhishingDetector:
         Returns:
             bool: 是否成功加载
         """
+        # 检查文件是否存在
+        import os
+        if not os.path.exists(self.model_path):
+            print(f"模型文件不存在：{self.model_path}")
+            self.model = None
+            # 切换到演示模式
+            self.generate_demo_model()
+            return False
+        
         try:
             # 尝试加载 LightGBM 模型
             import lightgbm as lgb
@@ -81,6 +94,8 @@ class PhishingDetector:
         except Exception as e:
             print(f"加载 LightGBM 模型失败：{e}")
             self.model = None
+            # 切换到演示模式
+            self.generate_demo_model()
             return False
 
     def generate_demo_model(self):
@@ -132,6 +147,9 @@ class PhishingDetector:
             'has_executable_attachment': 0.35,
             'total_attachment_size': 0.00001,
             'has_double_extension': 0.30,
+            'sandbox_detected': 0.40,
+            'max_sandbox_detection_ratio': 0.35,
+            'has_sandbox_analysis': 0.05,
 
             # HTML 特征
             'has_html_body': 0.02,
@@ -139,6 +157,7 @@ class PhishingDetector:
             'has_hidden_links': 0.25,
             'has_form': 0.15,
             'has_iframe': 0.20,
+            'has_external_script': 0.25,
         }
 
     def predict(self, feature_vector: Dict) -> Tuple[bool, float]:
@@ -157,8 +176,8 @@ class PhishingDetector:
             return self._demo_predict(feature_vector)
 
         if self.model is None:
-            # 如果没有模型，返回低风险但带警告
-            return False, 0.0
+            # 如果没有模型，使用演示模式
+            return self._demo_predict(feature_vector)
 
         try:
             # 构造与训练时相同结构的输入
@@ -175,12 +194,17 @@ class PhishingDetector:
 
         except Exception as e:
             print(f"预测错误：{e}")
-            return False, 0.0
+            # 如果模型预测失败，切换到演示模式
+            return self._demo_predict(feature_vector)
 
     def _demo_predict(self, feature_vector: Dict) -> Tuple[bool, float]:
         """
         演示模式下的预测 (基于规则)
         """
+        # 确保 demo_weights 存在
+        if not hasattr(self, 'demo_weights'):
+            self.generate_demo_model()
+        
         score = 0.0
 
         for feature, weight in self.demo_weights.items():
@@ -271,8 +295,8 @@ def batch_predict(feature_vectors: List[Dict], model: Optional[PhishingDetector]
 
 if __name__ == "__main__":
     # 测试示例
-    from src.features import build_feature_vector
-    from src.parse_email import parse_email
+    from features import build_feature_vector
+    from parse_email import parse_email
 
     test_email = """From: "Bank Security" <security@suspicious-bank.com>
 To: user@example.com

@@ -9,10 +9,10 @@ from datetime import datetime, timedelta
 from typing import Dict
 from flask import Flask, render_template, request, jsonify, send_from_directory
 from werkzeug.utils import secure_filename
-from parse_email import parse_email
-from features import build_feature_vector
-from detector import PhishingDetector
-from email_traceback import generate_traceback_report
+from src.parse_email import parse_email
+from src.features import build_feature_vector
+from src.detector import PhishingDetector
+from src.email_traceback import generate_traceback_report
 
 
 # 初始化 Flask 应用
@@ -154,6 +154,12 @@ def dashboard():
     return render_template('dashboard.html')
 
 
+@app.route('/report.html')
+def report_page():
+    """渲染报告详情页面"""
+    return render_template('report.html')
+
+
 @app.route('/api/health')
 def health_check():
     """健康检查接口"""
@@ -239,6 +245,15 @@ def process_email(raw_email: str):
     # 保存到数据库
     save_to_database(parsed, is_phish, confidence, traceback_report)
 
+    # 处理附件的沙箱分析结果
+    attachments_with_analysis = []
+    for att in parsed.get('attachments', []):
+        # 移除内容字段以减少响应大小
+        att_with_analysis = {**att}
+        if 'content' in att_with_analysis:
+            del att_with_analysis['content']
+        attachments_with_analysis.append(att_with_analysis)
+
     result = {
         'is_phish': is_phish,
         'confidence': round(confidence, 4),
@@ -258,11 +273,17 @@ def process_email(raw_email: str):
             'has_html_body': 1 if parsed.get('html_body') else 0
         },
         'features': features,
-        'attachments': parsed.get('attachments', []),
+        'attachments': attachments_with_analysis,
         'html_links': parsed.get('html_links', []),
         'html_forms': parsed.get('html_forms', []),
         'headers': parsed.get('headers', {}),
-        'traceback': traceback_report
+        'traceback': traceback_report,
+        'sandbox_analysis': {
+            'enabled': bool(vt_api_key),
+            'has_sandbox_analysis': features.get('has_sandbox_analysis', 0) == 1,
+            'sandbox_detected': features.get('sandbox_detected', 0) == 1,
+            'max_detection_ratio': features.get('max_sandbox_detection_ratio', 0.0)
+        }
     }
 
     return jsonify(result)

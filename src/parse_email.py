@@ -298,7 +298,8 @@ def parse_attachment(part) -> Optional[Dict]:
             'size': size,
             'md5': md5_hash,
             'sha256': sha256_hash,
-            'is_suspicious_type': is_suspicious_type
+            'is_suspicious_type': is_suspicious_type,
+            'content': payload  # 保留文件内容用于沙箱分析
         }
 
     except Exception as e:

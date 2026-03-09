@@ -368,7 +368,7 @@ def generate_traceback_report(parsed_email: Dict, vt_api_key: str = "", ip_api_u
 
 
 if __name__ == "__main__":
-    from src.parse_email import parse_email
+    from parse_email import parse_email
 
     test_email = """From: "Security Team" <noreply@suspicious-site.com>
 To: user@example.com
