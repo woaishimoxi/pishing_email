@@ -200,6 +200,10 @@ class PhishingDetector:
             # 获取模型原始概率
             input_data = [[float(features.get(col, 0)) for col in FEATURE_COLUMNS]]
             model_prob = self.model.predict(np.array(input_data))[0]
+            # 对于三分类模型，取钓鱼邮件类别的概率
+            if isinstance(model_prob, np.ndarray) and len(model_prob) == 3:
+                # 假设模型输出顺序为 [正常, 可疑, 钓鱼]
+                model_prob = model_prob[2]
         else:
             # 降级处理，使用演示模式
             _, model_prob = self._demo_predict(features)
