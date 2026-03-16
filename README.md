@@ -32,8 +32,8 @@
 │   ├── emails-phishing.mbox  # 钓鱼邮件数据集
 │   ├── features-enron.csv    # 正常邮件特征
 │   └── features-phishing.csv # 钓鱼邮件特征
-├── models/                   # 模型目录
-│   └── phish_detector.txt    # 训练好的 LightGBM 模型
+├── models/                   # 模型目录（运行时自动生成）
+│   └── phish_detector.txt    # 训练好的 LightGBM 模型（如不存在则使用演示模式）
 ├── progress/                 # 项目进度文档
 │   ├── docs/                 # 文档目录
 │   ├── scripts/              # 测试脚本
@@ -44,7 +44,6 @@
 ├── .env.example              # 环境变量示例
 ├── start.bat                 # Windows 启动脚本
 ├── start.sh                  # Linux/Mac 启动脚本
-├── test_system.py            # 系统测试脚本
 ├── train_model.py            # 模型训练脚本
 └── README.md                 # 项目说明文档
 ```
@@ -152,7 +151,8 @@ GET /api/stats/daily?days=7
 ### 获取告警记录
 ```bash
 GET /api/alerts?page=1&per_page=20
-GET /api/alerts?is_phish=true
+GET /api/alerts?label=PHISHING
+GET /api/alerts?label=SAFE
 ```
 
 ### 关闭系统
@@ -306,5 +306,5 @@ MIT License
 
 ---
 
-*最后更新：2026-03-08*
-*版本号：v1.3.0*
+*最后更新：2026-03-16*
+*版本号：v1.7.0*
