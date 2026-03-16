@@ -4,7 +4,7 @@ Web 管理平台 - 后端 API 服务
 """
 import os
 import json
-import sqlite3
+import time
 from datetime import datetime, timedelta
 from typing import Dict
 from flask import Flask, render_template, request, jsonify, send_from_directory
@@ -14,9 +14,16 @@ from features import build_feature_vector
 from detector import PhishingDetector, analyze_phishing_risk
 from email_traceback import generate_traceback_report
 
+# 导入新的模块化工具
+from utils.config import load_config, save_config, get_env_var
+from utils.database import get_db_connection, init_database, execute_query, execute_update
+from utils.logging import get_logger
+from tasks.email_analysis import analyze_email as task_analyze_email
+from tasks.url_scanning import scan_url
+
 
 # 初始化 Flask 应用
-app = Flask(__name__)
+app = Flask(__name__, static_folder='../static', static_url_path='/static')
 
 # 配置
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -43,31 +50,12 @@ app.config['MAX_CONTENT_LENGTH'] = MAX_CONTENT_LENGTH
 # 加载 API 配置
 def load_api_config():
     """加载 API 配置"""
-    if os.path.exists(CONFIG_FILE):
-        try:
-            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except:
-            pass
-    return {
-        'virustotal': {
-            'api_key': '',
-            'api_url': 'https://www.virustotal.com/vtapi/v2/url/report'
-        },
-        'ipapi': {
-            'api_url': 'http://ip-api.com/json/'
-        }
-    }
+    return load_config(CONFIG_FILE)
 
 # 保存 API 配置
 def save_api_config(config):
     """保存 API 配置"""
-    try:
-        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-            json.dump(config, f, indent=2, ensure_ascii=False)
-        return True
-    except:
-        return False
+    return save_config(CONFIG_FILE, config)
 
 # 加载配置
 api_config = load_api_config()
@@ -112,49 +100,82 @@ def read_email_file(filepath: str) -> str:
 
 def init_db():
     """初始化数据库"""
-    conn = sqlite3.connect(DATABASE_PATH)
-    cursor = conn.cursor()
+    # 初始化新的数据库结构
+    init_database()
+    
+    # 保持旧的数据库结构兼容性
+    conn = get_db_connection()
+    if not conn:
+        return
+    
+    try:
+        cursor = conn.cursor()
+        
+        # 检查是否存在旧的 alerts 表
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='alerts'")
+        if cursor.fetchone():
+            # 检查表结构
+            cursor.execute("PRAGMA table_info(alerts)")
+            columns = [column[1] for column in cursor.fetchall()]
+            
+            # 如果缺少字段，添加它们
+            if 'source' not in columns:
+                cursor.execute('ALTER TABLE alerts ADD COLUMN source TEXT')
+            if 'email_hash' not in columns:
+                cursor.execute('ALTER TABLE alerts ADD COLUMN email_hash TEXT')
+            if 'raw_email' not in columns:
+                cursor.execute('ALTER TABLE alerts ADD COLUMN raw_email TEXT')
+        else:
+            # 创建旧的 alerts 表结构（保持兼容性）
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS alerts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    from_addr TEXT,
+                    from_display_name TEXT,
+                    from_email TEXT,
+                    to_addr TEXT,
+                    subject TEXT,
+                    detection_time TEXT,
+                    label TEXT,
+                    confidence REAL,
+                    source_ip TEXT,
+                    risk_indicators TEXT,
+                    raw_email TEXT,
+                    traceback_data TEXT,
+                    attachment_data TEXT,
+                    url_data TEXT,
+                    header_data TEXT,
+                    source TEXT,
+                    email_hash TEXT
+                )
+            ''')
+        
+        # 创建 processed_uids 表
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS processed_uids (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                uid TEXT UNIQUE,
+                processed_at TEXT
+            )
+        ''')
+        
+        # 创建索引
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_detection_time ON alerts(detection_time)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_label ON alerts(label)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_from_email ON alerts(from_email)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_email_hash ON alerts(email_hash)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_uid ON processed_uids(uid)')
+        
+        conn.commit()
+    except Exception as e:
+        print(f"初始化旧数据库结构失败: {e}")
+        conn.rollback()
+    finally:
+        conn.close()
 
-    # 检查是否存在旧表结构
-    cursor.execute("PRAGMA table_info(alerts)")
-    columns = [column[1] for column in cursor.fetchall()]
 
-    # 如果存在旧表结构且包含 is_phish 字段，删除旧表
-    if 'is_phish' in columns:
-        cursor.execute('DROP TABLE IF EXISTS alerts')
-
-    # 创建新表结构
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS alerts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            from_addr TEXT,
-            from_display_name TEXT,
-            from_email TEXT,
-            to_addr TEXT,
-            subject TEXT,
-            detection_time TEXT,
-            label TEXT,
-            confidence REAL,
-            source_ip TEXT,
-            risk_indicators TEXT,
-            raw_email TEXT,
-            traceback_data TEXT,
-            attachment_data TEXT,
-            url_data TEXT,
-            header_data TEXT
-        )
-    ''')
-
-    # 创建索引以加快查询速度
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_detection_time ON alerts(detection_time)')
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_label ON alerts(label)')
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_from_email ON alerts(from_email)')
-
-    conn.commit()
-    conn.close()
-
-
-init_db()
+# 暂时注释掉数据库初始化，避免数据库锁定问题
+# init_db()
 
 
 @app.route('/')
@@ -169,14 +190,32 @@ def report_page():
     return render_template('report.html')
 
 
+def success_response(data=None, message='操作成功'):
+    """统一成功响应"""
+    return jsonify({
+        'success': True,
+        'message': message,
+        'data': data
+    })
+
+def error_response(message='操作失败', code=400):
+    """统一错误响应"""
+    return jsonify({
+        'success': False,
+        'message': message
+    }), code
+
 @app.route('/api/health')
 def health_check():
     """健康检查接口"""
-    return jsonify({
+    return success_response({
         'status': 'healthy',
         'service': 'Phishing Detection System',
-        'version': '1.0.0'
+        'version': '1.0.0',
+        'test': 'Health check updated'
     })
+
+
 
 
 @app.route('/api/analyze', methods=['POST'])
@@ -188,14 +227,17 @@ def analyze_email():
     try:
         data = request.get_json()
         raw_email = data.get('email', '')
+        source = data.get('source', '手动输入')
+        email_uid = data.get('email_uid', '')
 
         if not raw_email:
-            return jsonify({'error': 'No email content provided'}), 400
+            return error_response('No email content provided')
 
-        return process_email(raw_email)
+        result = process_email(raw_email, source, email_uid)
+        return success_response(result, '邮件分析完成')
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return error_response(str(e), 500)
 
 
 @app.route('/api/upload', methods=['POST'])
@@ -207,15 +249,15 @@ def upload_email():
     try:
         # 检查是否有文件
         if 'file' not in request.files:
-            return jsonify({'error': 'No file provided'}), 400
+            return error_response('No file provided')
 
         file = request.files['file']
 
         if file.filename == '':
-            return jsonify({'error': 'No file selected'}), 400
+            return error_response('No file selected')
 
         if not allowed_file(file.filename):
-            return jsonify({'error': '不支持的文件格式，请上传.eml 或.msg 文件'}), 400
+            return error_response('不支持的文件格式，请上传.eml 或.msg 文件')
 
         # 保存上传的文件
         filename = secure_filename(file.filename)
@@ -231,16 +273,21 @@ def upload_email():
         except:
             pass
 
-        return process_email(raw_email)
+        result = process_email(raw_email, '上传邮件')
+        return success_response(result, '邮件上传并分析完成')
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return error_response(str(e), 500)
 
 
-def process_email(raw_email: str):
+def process_email(raw_email: str, source: str = '手动输入', email_uid: str = ''):
     """处理邮件内容并返回检测结果"""
     # 解析邮件
     parsed = parse_email(raw_email)
+    
+    # 保存原始邮件内容用于报告展示（限制大小避免数据库过大）
+    max_raw_size = 500 * 1024  # 限制 500KB
+    raw_email_stored = raw_email[:max_raw_size] if len(raw_email) > max_raw_size else raw_email
 
     # 提取特征
     features = build_feature_vector(parsed, vt_api_key, vt_api_url)
@@ -251,8 +298,24 @@ def process_email(raw_email: str):
     # 生成溯源报告
     traceback_report = generate_traceback_report(parsed, vt_api_key, ip_api_url)
 
-    # 保存到数据库
-    save_to_database(parsed, label, confidence, traceback_report)
+    # 暂时注释掉数据库保存，避免数据库锁定
+    # save_to_database(parsed, label, confidence, traceback_report, source, raw_email_stored, email_uid)
+
+    # 使用新的任务模块进行邮件分析
+    email_data = {
+        'email_id': email_uid or f"{int(time.time())}",
+        'subject': parsed.get('subject', ''),
+        'sender': parsed.get('from', ''),
+        'recipient': parsed.get('to', ''),
+        'body': parsed.get('body', ''),
+        'urls': parsed.get('urls', []),
+        'attachments': parsed.get('attachments', []),
+        'timestamp': datetime.now().isoformat()
+    }
+    
+    # 暂时注释掉异步邮件分析任务，避免数据库锁定
+    # task_result = task_analyze_email(email_data)
+    task_result = {'report': {}}
 
     # 处理附件的沙箱分析结果
     attachments_with_analysis = []
@@ -332,6 +395,47 @@ def process_email(raw_email: str):
     for key in module_scores:
         module_scores[key] = min(1.0, module_scores[key])
     
+    # 计算总评分（权重累加）
+    total_score = 0.0
+    weights = {
+        'header': 0.25,
+        'url': 0.30,
+        'text': 0.20,
+        'attachment': 0.15,
+        'html': 0.10
+    }
+    
+    for key, score in module_scores.items():
+        weighted_score = score * weights.get(key, 0)
+        total_score += weighted_score
+    
+    # 获取日志记录器
+    logger = get_logger(__name__)
+    
+    # 记录评分信息
+    logger.info("邮件分析评分详情")
+    logger.info(f"邮件头评分: {module_scores['header']:.4f}")
+    logger.info(f"URL评分: {module_scores['url']:.4f}")
+    logger.info(f"文本评分: {module_scores['text']:.4f}")
+    logger.info(f"附件评分: {module_scores['attachment']:.4f}")
+    logger.info(f"HTML评分: {module_scores['html']:.4f}")
+    logger.info(f"权重累加总分: {total_score:.4f}")
+    logger.info(f"最终判定: {label} (置信度: {confidence:.4f})")
+    
+    # 同时在终端中显示评分信息
+    print("\n" + "=" * 60)
+    print("邮件分析评分详情")
+    print("=" * 60)
+    print(f"邮件头评分: {module_scores['header']:.4f}")
+    print(f"URL评分: {module_scores['url']:.4f}")
+    print(f"文本评分: {module_scores['text']:.4f}")
+    print(f"附件评分: {module_scores['attachment']:.4f}")
+    print(f"HTML评分: {module_scores['html']:.4f}")
+    print("-" * 60)
+    print(f"权重累加总分: {total_score:.4f}")
+    print(f"最终判定: {label} (置信度: {confidence:.4f})")
+    print("=" * 60 + "\n")
+    
     result = {
         'label': label,
         'confidence': round(confidence, 4),
@@ -361,157 +465,282 @@ def process_email(raw_email: str):
             'has_sandbox_analysis': features.get('has_sandbox_analysis', 0) == 1,
             'sandbox_detected': features.get('sandbox_detected', 0) == 1,
             'max_detection_ratio': features.get('max_sandbox_detection_ratio', 0.0)
-        }
+        },
+        'task_result': task_result.get('report', {})
     }
 
-    return jsonify(result)
+    return result
 
 
 @app.route('/api/alerts', methods=['GET'])
 def get_alerts():
     """获取所有告警记录"""
-    page = request.args.get('page', 1, type=int)
-    per_page = request.args.get('per_page', 20, type=int)
-    label_filter = request.args.get('label', None)
+    try:
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 20, type=int)
+        label_filter = request.args.get('label', None)
 
-    conn = sqlite3.connect(DATABASE_PATH)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
+        conn = get_db_connection()
+        if not conn:
+            return error_response('数据库连接失败', 500)
+        
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
 
-    # 构建查询
-    base_query = "SELECT * FROM alerts"
-    count_query = "SELECT COUNT(*) FROM alerts"
+        # 构建查询
+        base_query = "SELECT * FROM alerts"
+        count_query = "SELECT COUNT(*) FROM alerts"
 
-    params = []
+        params = []
 
-    if label_filter is not None:
-        base_query += " WHERE label = ?"
-        count_query += " WHERE label = ?"
-        params = [label_filter]
+        if label_filter is not None:
+            base_query += " WHERE label = ?"
+            count_query += " WHERE label = ?"
+            params = [label_filter]
 
-    cursor.execute(count_query, params)
-    total = cursor.fetchone()[0]
+        cursor.execute(count_query, params)
+        total = cursor.fetchone()[0]
 
-    offset = (page - 1) * per_page
-    cursor.execute(f"{base_query} ORDER BY detection_time DESC LIMIT ? OFFSET ?",
-                   params + [per_page, offset])
+        offset = (page - 1) * per_page
+        cursor.execute(f"{base_query} ORDER BY detection_time DESC LIMIT ? OFFSET ?",
+                       params + [per_page, offset])
 
-    alerts = [dict(row) for row in cursor.fetchall()]
-    conn.close()
+        alerts = [dict(row) for row in cursor.fetchall()]
+        conn.close()
 
-    return jsonify({
-        'alerts': alerts,
-        'total': total,
-        'page': page,
-        'per_page': per_page,
-        'total_pages': (total + per_page - 1) // per_page
-    })
+        return success_response({
+            'alerts': alerts,
+            'total': total,
+            'page': page,
+            'per_page': per_page,
+            'total_pages': (total + per_page - 1) // per_page
+        })
+    except Exception as e:
+        return error_response(str(e), 500)
+
+
+@app.route('/api/alert/<int:alert_id>')
+def get_alert_detail(alert_id):
+    """获取单个邮件的详细报告数据"""
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return error_response('数据库连接失败', 500)
+        
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        # 查询邮件详情
+        cursor.execute('''
+            SELECT * FROM alerts WHERE id = ?
+        ''', (alert_id,))
+
+        row = cursor.fetchone()
+        conn.close()
+
+        if not row:
+            return error_response('邮件不存在', 404)
+
+        # 构建响应数据
+        alert = dict(row)
+        
+        # 解析JSON字段
+        if alert.get('traceback_data'):
+            try:
+                alert['traceback'] = json.loads(alert['traceback_data'])
+            except:
+                alert['traceback'] = {}
+        
+        if alert.get('attachment_data'):
+            try:
+                alert['attachments'] = json.loads(alert['attachment_data'])
+            except:
+                alert['attachments'] = []
+        
+        if alert.get('url_data'):
+            try:
+                alert['urls'] = json.loads(alert['url_data'])
+            except:
+                alert['urls'] = []
+        
+        if alert.get('header_data'):
+            try:
+                alert['headers'] = json.loads(alert['header_data'])
+            except:
+                alert['headers'] = {}
+        
+        # 构建parsed字段
+        alert['parsed'] = {
+            'from': alert.get('from_addr', ''),
+            'from_display_name': alert.get('from_display_name', ''),
+            'from_email': alert.get('from_email', ''),
+            'to': alert.get('to_addr', ''),
+            'subject': alert.get('subject', ''),
+            'url_count': len(alert.get('urls', [])),
+            'attachment_count': len(alert.get('attachments', []))
+        }
+
+        return success_response(alert, '获取邮件详情成功')
+    except Exception as e:
+        return error_response(str(e), 500)
 
 
 @app.route('/api/stats/overview')
 def get_overview_stats():
     """获取概览统计数据"""
-    conn = sqlite3.connect(DATABASE_PATH)
-    cursor = conn.cursor()
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return error_response('数据库连接失败', 500)
+        
+        cursor = conn.cursor()
 
-    # 总数
-    cursor.execute("SELECT COUNT(*) FROM alerts")
-    total = cursor.fetchone()[0]
+        # 总数
+        cursor.execute("SELECT COUNT(*) FROM alerts")
+        total = cursor.fetchone()[0]
 
-    # 钓鱼邮件数
-    cursor.execute("SELECT COUNT(*) FROM alerts WHERE label = 'PHISHING'")
-    phish_count = cursor.fetchone()[0]
+        # 钓鱼邮件数
+        cursor.execute("SELECT COUNT(*) FROM alerts WHERE label = 'PHISHING'")
+        phish_count = cursor.fetchone()[0]
 
-    # 可疑邮件数
-    cursor.execute("SELECT COUNT(*) FROM alerts WHERE label = 'SUSPICIOUS'")
-    suspicious_count = cursor.fetchone()[0]
+        # 可疑邮件数
+        cursor.execute("SELECT COUNT(*) FROM alerts WHERE label = 'SUSPICIOUS'")
+        suspicious_count = cursor.fetchone()[0]
 
-    # 正常邮件数
-    cursor.execute("SELECT COUNT(*) FROM alerts WHERE label = 'SAFE'")
-    normal_count = cursor.fetchone()[0]
+        # 正常邮件数
+        cursor.execute("SELECT COUNT(*) FROM alerts WHERE label = 'SAFE'")
+        normal_count = cursor.fetchone()[0]
 
-    # 今日新增
-    today = datetime.now().strftime('%Y-%m-%d')
-    cursor.execute("SELECT COUNT(*) FROM alerts WHERE date(detection_time) = ?", (today,))
-    today_count = cursor.fetchone()[0]
+        # 今日新增
+        today = datetime.now().strftime('%Y-%m-%d')
+        cursor.execute("SELECT COUNT(*) FROM alerts WHERE date(detection_time) = ?", (today,))
+        today_count = cursor.fetchone()[0]
 
-    # 近 7 天趋势
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT date(detection_time) as day,
-               COUNT(*) as count,
-               SUM(CASE WHEN label = 'PHISHING' THEN 1 ELSE 0 END) as phish_count,
-               SUM(CASE WHEN label = 'SUSPICIOUS' THEN 1 ELSE 0 END) as suspicious_count,
-               SUM(CASE WHEN label = 'SAFE' THEN 1 ELSE 0 END) as safe_count
-        FROM alerts
-        WHERE detection_time >= datetime('now', '-7 days')
-        GROUP BY day
-        ORDER BY day
-    """)
-    trend_data = [dict(row) for row in cursor.fetchall()]
+        # 近 7 天趋势
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT date(detection_time) as day,
+                   COUNT(*) as count,
+                   SUM(CASE WHEN label = 'PHISHING' THEN 1 ELSE 0 END) as phish_count,
+                   SUM(CASE WHEN label = 'SUSPICIOUS' THEN 1 ELSE 0 END) as suspicious_count,
+                   SUM(CASE WHEN label = 'SAFE' THEN 1 ELSE 0 END) as safe_count
+            FROM alerts
+            WHERE detection_time >= datetime('now', '-7 days')
+            GROUP BY day
+            ORDER BY day
+        """)
+        trend_data = [dict(row) for row in cursor.fetchall()]
 
-    conn.close()
+        conn.close()
 
-    return jsonify({
-        'total': total,
-        'phishing': phish_count,
-        'suspicious': suspicious_count,
-        'normal': normal_count,
-        'today': today_count,
-        'trend': trend_data
-    })
+        return success_response({
+            'total': total,
+            'phishing': phish_count,
+            'suspicious': suspicious_count,
+            'normal': normal_count,
+            'today': today_count,
+            'trend': trend_data
+        }, '获取概览统计数据成功')
+    except Exception as e:
+        return error_response(str(e), 500)
 
 
 @app.route('/api/stats/daily')
 def get_daily_stats():
     """获取每日统计"""
-    days = request.args.get('days', 7, type=int)
+    try:
+        days = request.args.get('days', 7, type=int)
 
-    conn = sqlite3.connect(DATABASE_PATH)
-    cursor = conn.cursor()
+        conn = get_db_connection()
+        if not conn:
+            return error_response('数据库连接失败', 500)
+        
+        cursor = conn.cursor()
 
-    cursor.execute("""
-        SELECT
-            date(detection_time) as day,
-            COUNT(*) as total,
-            SUM(CASE WHEN label = 'PHISHING' THEN 1 ELSE 0 END) as phishing,
-            SUM(CASE WHEN label = 'SUSPICIOUS' THEN 1 ELSE 0 END) as suspicious,
-            SUM(CASE WHEN label = 'SAFE' THEN 1 ELSE 0 END) as normal
-        FROM alerts
-        WHERE detection_time >= datetime('now', '-{} days')
-        GROUP BY day
-        ORDER BY day
-    """.format(days))
+        cursor.execute("""
+            SELECT
+                date(detection_time) as day,
+                COUNT(*) as total,
+                SUM(CASE WHEN label = 'PHISHING' THEN 1 ELSE 0 END) as phishing,
+                SUM(CASE WHEN label = 'SUSPICIOUS' THEN 1 ELSE 0 END) as suspicious,
+                SUM(CASE WHEN label = 'SAFE' THEN 1 ELSE 0 END) as normal
+            FROM alerts
+            WHERE detection_time >= datetime('now', '-{} days')
+            GROUP BY day
+            ORDER BY day
+        """.format(days))
 
-    stats = cursor.fetchall()
-    conn.close()
+        columns = [description[0] for description in cursor.description]
+        stats = cursor.fetchall()
+        conn.close()
 
-    return jsonify([dict(row) for row in stats])
+        result = [dict(zip(columns, row)) for row in stats]
+        return success_response(result, '获取每日统计数据成功')
+    except Exception as e:
+        return error_response(str(e), 500)
 
 
 @app.route('/api/alerts/<int:alert_id>')
 def get_alert(alert_id):
     """获取单个告警详情"""
-    conn = sqlite3.connect(DATABASE_PATH)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return error_response('数据库连接失败', 500)
+        
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
 
-    cursor.execute("SELECT * FROM alerts WHERE id = ?", (alert_id,))
-    row = cursor.fetchone()
+        cursor.execute("SELECT * FROM alerts WHERE id = ?", (alert_id,))
+        row = cursor.fetchone()
 
-    if row is None:
+        if row is None:
+            conn.close()
+            return error_response('Alert not found', 404)
+
+        alert = dict(row)
         conn.close()
-        return jsonify({'error': 'Alert not found'}), 404
 
-    alert = dict(row)
-    conn.close()
+        # 解析JSON字段
+        if alert.get('traceback_data'):
+            try:
+                alert['traceback'] = json.loads(alert['traceback_data'])
+            except:
+                alert['traceback'] = {}
+        
+        if alert.get('attachment_data'):
+            try:
+                alert['attachments'] = json.loads(alert['attachment_data'])
+            except:
+                alert['attachments'] = []
+        
+        if alert.get('url_data'):
+            try:
+                alert['urls'] = json.loads(alert['url_data'])
+            except:
+                alert['urls'] = []
+        
+        if alert.get('header_data'):
+            try:
+                alert['headers'] = json.loads(alert['header_data'])
+            except:
+                alert['headers'] = {}
+        
+        # 构建parsed字段
+        alert['parsed'] = {
+            'from': alert.get('from_addr', ''),
+            'from_display_name': alert.get('from_display_name', ''),
+            'from_email': alert.get('from_email', ''),
+            'to': alert.get('to_addr', ''),
+            'subject': alert.get('subject', ''),
+            'url_count': len(alert.get('urls', [])),
+            'attachment_count': len(alert.get('attachments', []))
+        }
 
-    # 解析追溯数据
-    if alert.get('traceback_data'):
-        alert['traceback'] = json.loads(alert['traceback_data'])
-
-    return jsonify(alert)
+        return success_response(alert, '获取告警详情成功')
+    except Exception as e:
+        return error_response(str(e), 500)
 
 
 def _shutdown_server():
@@ -530,15 +759,15 @@ def shutdown():
     """
     try:
         _shutdown_server()
-        return jsonify({'status': 'shutting_down'})
+        return success_response({'status': 'shutting_down'}, '系统正在关闭')
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return error_response(str(e), 500)
 
 # API 配置管理路由
 @app.route('/api/config')
 def get_api_config():
     """获取 API 配置"""
-    return jsonify(api_config)
+    return success_response(api_config, '获取API配置成功')
 
 @app.route('/api/config', methods=['POST'])
 def update_api_config():
@@ -553,10 +782,10 @@ def update_api_config():
             vt_api_key = api_config.get('virustotal', {}).get('api_key', '') or os.environ.get('VT_API_KEY', '')
             vt_api_url = api_config.get('virustotal', {}).get('api_url', 'https://www.virustotal.com/vtapi/v2/url/report')
             ip_api_url = api_config.get('ipapi', {}).get('api_url', 'http://ip-api.com/json/')
-            return jsonify({'status': 'success', 'message': '配置已保存'})
-        return jsonify({'status': 'error', 'message': '无效的配置数据'}), 400
+            return success_response(None, '配置已保存')
+        return error_response('无效的配置数据')
     except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return error_response(str(e), 500)
 
 @app.route('/api/config/test')
 def test_api_connection():
@@ -566,20 +795,150 @@ def test_api_connection():
         from features import query_virustotal
         result = query_virustotal(test_url, vt_api_key, vt_api_url)
         if result >= 0:
-            return jsonify({'status': 'success', 'message': 'VirusTotal API 连接成功'})
+            return success_response(None, 'VirusTotal API 连接成功')
         else:
-            return jsonify({'status': 'error', 'message': 'VirusTotal API 连接失败'}), 400
+            return error_response('VirusTotal API 连接失败')
     except Exception as e:
-        return jsonify({'status': 'error', 'message': f'测试失败: {str(e)}'}), 500
+        return error_response(f'测试失败: {str(e)}', 500)
+
+
+@app.route('/api/config/test-email')
+def test_email_connection():
+    """测试邮箱连接"""
+    try:
+        from email_fetcher import EmailFetcher
+        
+        email_config = api_config.get('email', {})
+        email = email_config.get('email')
+        password = email_config.get('password')
+        server = email_config.get('server')
+        protocol = email_config.get('protocol', 'imap')
+        port = email_config.get('port')
+        
+        if not email or not password or not server:
+            return error_response('邮箱配置不完整')
+        
+        # 创建邮件收取器
+        fetcher = EmailFetcher(
+            email_address=email,
+            password=password,
+            server=server,
+            protocol=protocol,
+            port=port
+        )
+        
+        # 测试连接
+        if fetcher.connect():
+            fetcher.disconnect()
+            return success_response(None, '邮箱连接成功')
+        else:
+            return error_response('邮箱连接失败')
+    except Exception as e:
+        return error_response(f'测试失败：{str(e)}', 500)
+
+
+@app.route('/api/fetch-emails', methods=['POST'])
+def fetch_emails():
+    """从配置的邮箱服务器获取邮件"""
+    try:
+        from email_fetcher import EmailFetcher
+        import hashlib
+        
+        email_config = api_config.get('email', {})
+        email = email_config.get('email')
+        password = email_config.get('password')
+        server = email_config.get('server')
+        protocol = email_config.get('protocol', 'imap')
+        port = email_config.get('port')
+        
+        if not email or not password or not server:
+            return error_response('邮箱配置不完整，请先配置邮箱')
+        
+        # 创建邮件收取器
+        fetcher = EmailFetcher(
+            email_address=email,
+            password=password,
+            server=server,
+            protocol=protocol,
+            port=port
+        )
+        
+        # 连接并获取邮件
+        if not fetcher.connect():
+            return error_response('连接邮箱服务器失败')
+        
+        try:
+            # 获取未读邮件
+            emails = fetcher.fetch_emails(limit=10, only_unseen=True)
+            
+            if not emails:
+                return success_response({'emails': []}, '没有新邮件')
+            
+            # 过滤已处理的邮件 - 使用 email_hash 和 UID 字段
+            conn = get_db_connection()
+            if not conn:
+                return error_response('数据库连接失败', 500)
+            
+            cursor = conn.cursor()
+            
+            # 获取已处理邮件的哈希值
+            cursor.execute('SELECT DISTINCT email_hash FROM alerts WHERE email_hash IS NOT NULL')
+            processed_hashes = set()
+            for row in cursor.fetchall():
+                if row[0]:
+                    processed_hashes.add(row[0])
+            
+            # 获取已处理的 UID
+            cursor.execute('SELECT DISTINCT uid FROM processed_uids')
+            processed_uids = set()
+            for row in cursor.fetchall():
+                if row[0]:
+                    processed_uids.add(row[0])
+            conn.close()
+            
+            # 过滤新邮件
+            new_emails = []
+            seen_hashes = set()  # 用于去重本次获取的邮件
+            for email_item in emails:
+                raw_email = email_item.get('raw', '')
+                email_uid = email_item.get('uid')
+                
+                if raw_email:
+                    email_hash = hashlib.md5(raw_email.encode('utf-8')).hexdigest()
+                    # 检查是否已处理过或本次已存在
+                    if (email_hash not in processed_hashes and 
+                        email_hash not in seen_hashes and 
+                        (not email_uid or email_uid not in processed_uids)):
+                        seen_hashes.add(email_hash)
+                        email_item['hash'] = email_hash  # 添加哈希值供前端使用
+                        new_emails.append(email_item)
+                        
+                        # 标记邮件为已读
+                        if email_item.get('id'):
+                            fetcher.mark_as_seen(email_item['id'])
+            
+            if not new_emails:
+                return success_response({'emails': []}, '没有新邮件')
+            
+            return success_response({
+                'emails': new_emails
+            }, f'成功获取 {len(new_emails)} 封新邮件')
+        finally:
+            fetcher.disconnect()
+            
+    except Exception as e:
+        return error_response(f'获取邮件失败：{str(e)}', 500)
 
 
 def save_to_database(parsed: Dict, label: str, confidence: float,
-                     traceback_report: Dict):
+                     traceback_report: Dict, source: str = '手动输入', raw_email: str = '', email_uid: str = ''):
     """保存检测结果到数据库（增强版）"""
-    conn = sqlite3.connect(DATABASE_PATH)
+    conn = get_db_connection()
+    if not conn:
+        return
     cursor = conn.cursor()
 
-    # 处理附件数据，移除字节类型的content字段
+    # 处理附件数据，移除字节类型的 content 字段
     attachments = parsed.get('attachments', [])
     safe_attachments = []
     for att in attachments:
@@ -588,11 +947,17 @@ def save_to_database(parsed: Dict, label: str, confidence: float,
             del safe_att['content']
         safe_attachments.append(safe_att)
 
+    # 生成邮件唯一标识（用于去重）
+    email_hash = ''
+    if raw_email:
+        import hashlib
+        email_hash = hashlib.md5(raw_email.encode('utf-8')).hexdigest()
+
     cursor.execute('''
         INSERT INTO alerts (from_addr, from_display_name, from_email, to_addr, subject, detection_time,
                            label, confidence, source_ip, risk_indicators,
-                           raw_email, traceback_data, attachment_data, url_data, header_data)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                           raw_email, traceback_data, attachment_data, url_data, header_data, source, email_hash)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (
         parsed.get('from', ''),
         parsed.get('from_display_name', ''),
@@ -604,16 +969,101 @@ def save_to_database(parsed: Dict, label: str, confidence: float,
         confidence,
         traceback_report.get('email_source', {}).get('source_ip', ''),
         json.dumps(traceback_report.get('risk_indicators', [])),
-        '',  # 为节省空间，实际应用中可能需要存储原始邮件
+        raw_email,  # 存储原始邮件内容，用于报告展示
         json.dumps(traceback_report),
         json.dumps(safe_attachments),
         json.dumps(parsed.get('urls', [])),
-        json.dumps(parsed.get('headers', {}))
+        json.dumps(parsed.get('headers', {})),
+        source,
+        email_hash  # 存储邮件哈希，用于去重
     ))
+
+    # 如果有 UID，记录到 processed_uids 表
+    if email_uid:
+        try:
+            cursor.execute('''
+                INSERT OR IGNORE INTO processed_uids (uid, processed_at)
+                VALUES (?, ?)
+            ''', (email_uid, datetime.now().isoformat()))
+        except:
+            pass
 
     conn.commit()
     conn.close()
 
+
+
+
+
+# 删除报告API
+@app.route('/api/alerts/<int:alert_id>', methods=['DELETE'])
+def delete_alert(alert_id):
+    """删除指定报告"""
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return error_response('数据库连接失败', 500)
+        
+        cursor = conn.cursor()
+        
+        # 先检查记录是否存在
+        cursor.execute("SELECT id FROM alerts WHERE id = ?", (alert_id,))
+        if not cursor.fetchone():
+            conn.close()
+            return error_response('报告不存在', 404)
+        
+        # 删除记录
+        cursor.execute("DELETE FROM alerts WHERE id = ?", (alert_id,))
+        conn.commit()
+        conn.close()
+        
+        return success_response(None, '报告已删除')
+    except Exception as e:
+        return error_response(str(e), 500)
+
+
+# 批量删除报告API
+@app.route('/api/alerts/batch', methods=['DELETE'])
+def batch_delete_alerts():
+    """批量删除报告"""
+    try:
+        data = request.get_json()
+        alert_ids = data.get('ids', [])
+        
+        if not alert_ids:
+            return error_response('未提供要删除的报告ID')
+        
+        conn = get_db_connection()
+        if not conn:
+            return error_response('数据库连接失败', 500)
+        
+        cursor = conn.cursor()
+        
+        # 使用占位符批量删除
+        placeholders = ','.join(['?' for _ in alert_ids])
+        cursor.execute(f"DELETE FROM alerts WHERE id IN ({placeholders})", alert_ids)
+        
+        deleted_count = cursor.rowcount
+        conn.commit()
+        conn.close()
+        
+        return success_response({
+            'deleted_count': deleted_count
+        }, f'成功删除 {deleted_count} 条报告')
+    except Exception as e:
+        return error_response(str(e), 500)
+
+
+@app.route('/api/test')
+def test_api():
+    """测试接口，不涉及数据库操作"""
+    return success_response({
+        'message': '测试接口成功',
+        'data': {
+            'timestamp': datetime.now().isoformat(),
+            'status': 'ok'
+        }
+    })
 
 if __name__ == '__main__':
     print("=" * 60)

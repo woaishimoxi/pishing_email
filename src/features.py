@@ -12,19 +12,119 @@
 """
 import time
 import re
+import json
+import os
 import whois
 import requests
 from urllib.parse import urlparse, parse_qs
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 from parse_email import parse_email
 from sandbox_analyzer import analyze_attachment
 
 
-# 可疑域名关键词列表 (可扩展)
-SUSPICIOUS_DOMAIN_KEYWORDS = [
+# 全局白名单配置
+_WHITELIST_CONFIG = None
+
+def load_whitelist_config(config_path: str = None) -> Dict:
+    """
+    加载白名单配置文件。
+    
+    Args:
+        config_path: 配置文件路径，默认为 config/whitelist.json
+        
+    Returns:
+        Dict: 白名单配置字典
+    """
+    global _WHITELIST_CONFIG
+    
+    if _WHITELIST_CONFIG is not None:
+        return _WHITELIST_CONFIG
+        
+    if config_path is None:
+        # 尝试多个可能的路径
+        possible_paths = [
+            'config/whitelist.json',
+            '../config/whitelist.json',
+            os.path.join(os.path.dirname(__file__), '..', 'config', 'whitelist.json'),
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'config', 'whitelist.json')
+        ]
+        for path in possible_paths:
+            if os.path.exists(path):
+                config_path = path
+                break
+    
+    if config_path and os.path.exists(config_path):
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                _WHITELIST_CONFIG = json.load(f)
+                return _WHITELIST_CONFIG
+        except Exception as e:
+            print(f"加载白名单配置失败: {e}")
+    
+    # 使用默认配置
+    _WHITELIST_CONFIG = {
+        "trusted_domains": [
+            "qq.com", "qlogo.cn", "mail.qq.com", "weixin.qq.com",
+            "steampowered.com", "google.com", "microsoft.com"
+        ],
+        "trusted_senders": [],
+        "verification_email_indicators": ["验证码", "verification", "verify", "code"],
+        "suspicious_domain_keywords": [
+            "paypa1.com", "g0ogle.com", "micros0ft.com", "amaz0n.com"
+        ]
+    }
+    return _WHITELIST_CONFIG
+
+
+def get_trusted_domains() -> Set[str]:
+    """获取可信域名集合"""
+    config = load_whitelist_config()
+    return set(config.get("trusted_domains", []))
+
+
+def get_trusted_senders() -> Set[str]:
+    """获取可信发件人集合"""
+    config = load_whitelist_config()
+    return set(config.get("trusted_senders", []))
+
+
+def get_verification_indicators() -> List[str]:
+    """获取验证码邮件指示词"""
+    config = load_whitelist_config()
+    return config.get("verification_email_indicators", ["验证码", "verification", "verify", "code"])
+
+
+def is_verification_email(subject: str, body: str) -> bool:
+    """
+    判断是否为验证码邮件。
+    
+    验证码邮件通常具有以下特征：
+    - 主题或正文中包含验证码相关词汇
+    - 不包含可疑链接或附件
+    - 通常是纯文本或简单HTML
+    
+    Args:
+        subject: 邮件主题
+        body: 邮件正文
+        
+    Returns:
+        bool: 是否为验证码邮件
+    """
+    indicators = get_verification_indicators()
+    text = (subject + " " + body).lower()
+    
+    # 检查是否包含验证码相关词汇
+    indicator_count = sum(1 for indicator in indicators if indicator.lower() in text)
+    
+    # 如果包含至少一个验证码指示词，可能是验证码邮件
+    return indicator_count > 0
+
+
+# 为了向后兼容，保留这些变量
+SUSPICIOUS_DOMAIN_KEYWORDS = load_whitelist_config().get("suspicious_domain_keywords", [
     'paypa1.com', 'g0ogle.com', 'micros0ft.com', 'amaz0n.com',
     'secure-login.net', 'account-verify.com', 'bank-security.net'
-]
+])
 
 # 紧急关键词列表
 URGENT_KEYWORDS = [
@@ -80,10 +180,41 @@ def extract_header_features(parsed_email: Dict) -> Dict:
     from_email = parsed_email.get('from_email', '')
     from_domain = from_email.split('@')[-1].lower() if '@' in from_email else ''
 
-    for keyword in SUSPICIOUS_DOMAIN_KEYWORDS:
-        if keyword in from_domain:
+    # 提取顶级域名（只保留最后两个部分，如 example.com）
+    if from_domain:
+        domain_parts = from_domain.split('.')
+        if len(domain_parts) >= 2:
+            top_level_domain = '.'.join(domain_parts[-2:])
+        else:
+            top_level_domain = from_domain
+    else:
+        top_level_domain = from_domain
+
+    # 检查域名是否在可疑关键词列表中（精确匹配或包含）
+    current_suspicious_keywords = load_whitelist_config().get("suspicious_domain_keywords", SUSPICIOUS_DOMAIN_KEYWORDS)
+    for keyword in current_suspicious_keywords:
+        if keyword in top_level_domain:
             features['is_suspicious_from_domain'] = 1
             break
+    
+    # 增强检测：检查域名是否包含可疑关键词
+    suspicious_domain_patterns = ['suspicious', 'bank', 'security', 'verify', 'login', 'secure', 'account', 'auth']
+    for pattern in suspicious_domain_patterns:
+        if pattern in top_level_domain.lower():
+            features['is_suspicious_from_domain'] = 1
+            break
+    
+    # 增强检测：检查显示名是否包含可疑关键词
+    from_display_name = parsed_email.get('from_display_name', '').lower()
+    suspicious_display_name_patterns = ['bank', 'security', 'paypal', 'google', 'microsoft', 'amazon', 'verification']
+    for pattern in suspicious_display_name_patterns:
+        if pattern in from_display_name:
+            features['is_suspicious_from_domain'] = 1
+            break
+    
+    # 检查发件人是否在可信列表中
+    if from_email.lower() in get_trusted_senders():
+        features['is_suspicious_from_domain'] = 0  # 可信发件人覆盖可疑标记
 
     # Received 链长度
     received_chain = parsed_email.get('received_chain', [])
@@ -116,6 +247,18 @@ def extract_header_features(parsed_email: Dict) -> Dict:
     return features
 
 
+# 域名年龄缓存，避免频繁查询被限制
+DOMAIN_AGE_CACHE = {}
+
+# 可信域名白名单 - 使用动态加载
+def get_trusted_domains_set() -> Set[str]:
+    """获取可信域名集合（动态加载）"""
+    return get_trusted_domains()
+
+
+# 为向后兼容保留
+TRUSTED_DOMAINS = get_trusted_domains_set()
+
 def get_domain_age(domain: str) -> float:
     """
     查询域名注册年龄（天数）。
@@ -126,6 +269,19 @@ def get_domain_age(domain: str) -> float:
     Returns:
         float: 域名注册天数，失败则返回默认值 3650(10 年)
     """
+    # 检查缓存
+    if domain in DOMAIN_AGE_CACHE:
+        return DOMAIN_AGE_CACHE[domain]
+    
+    # 检查白名单（动态加载）
+    domain_parts = domain.split('.')
+    if len(domain_parts) >= 2:
+        registered_domain = '.'.join(domain_parts[-2:])
+        if registered_domain in get_trusted_domains_set():
+            # 可信域名返回10年
+            DOMAIN_AGE_CACHE[domain] = 3650.0
+            return 3650.0
+
     try:
         w = whois.get(domain)
         if not w or not hasattr(w, 'creation_date'):
@@ -146,7 +302,9 @@ def get_domain_age(domain: str) -> float:
                 else:
                     return 3650.0
 
-                return min(age_seconds / 86400, 3650)
+                age_days = min(age_seconds / 86400, 3650)
+                DOMAIN_AGE_CACHE[domain] = age_days
+                return age_days
             except Exception as e:
                 pass
     except Exception as e:
@@ -238,8 +396,15 @@ def extract_url_features(url: str, vt_api_key: str = "", vt_api_url: str = "http
             if port not in ['80', '443', '8080']:
                 features['has_port'] = 1
 
-        # 查询 WHOIS 获取域名年龄
-        features['domain_age_days'] = get_domain_age(domain_clean)
+        # 提取顶级域名（只保留最后两个部分，如 example.com）
+        domain_parts = domain_clean.split('.')
+        if len(domain_parts) >= 2:
+            top_level_domain = '.'.join(domain_parts[-2:])
+        else:
+            top_level_domain = domain_clean
+
+        # 查询 WHOIS 获取域名年龄（使用顶级域名）
+        features['domain_age_days'] = get_domain_age(top_level_domain)
 
         # 检查域名是否包含数字或连字符
         sld = domain_clean.split('.')[0]
@@ -598,16 +763,14 @@ def vector_to_list(feature_vector: Dict) -> List[float]:
         'text_length', 'urgency_score', 'exclamation_count',
         'caps_ratio', 'url_count',
 
-        # 附件特征 (9 维)
+        # 附件特征 (5 维)
         'attachment_count', 'has_suspicious_attachment',
         'has_executable_attachment', 'total_attachment_size',
-        'has_double_extension', 'sandbox_detected',
-        'max_sandbox_detection_ratio', 'has_sandbox_analysis',
-        'attachment_risk_score',  # 新增：附件风险评分
+        'has_double_extension',
 
-        # HTML 特征 (6 维)
+        # HTML 特征 (5 维)
         'has_html_body', 'html_link_count', 'has_hidden_links',
-        'has_form', 'has_iframe', 'has_external_script',
+        'has_form', 'has_iframe',
     ]
 
     return [float(feature_vector.get(col, 0)) for col in FEATURE_COLUMNS]

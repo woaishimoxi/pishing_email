@@ -6,6 +6,7 @@
     <title>钓鱼邮件检测报告</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         :root {
@@ -266,67 +267,83 @@
                         </div>
                     </div>
                     <div class="card-body">
-                        <!-- 概览仪表盘 -->
-                        <div class="row mb-4">
-                            <div class="col-md-6">
-                                <div class="text-center">
-                                    <h3 class="mb-3">安全评分</h3>
-                                    <div class="d-inline-block position-relative" style="width: 200px; height: 200px;">
-                                        <canvas id="securityScoreChart"></canvas>
-                                        <div class="position-absolute top-50 start-50 translate-middle">
-                                            <span id="securityScoreValue" class="fs-1 fw-bold"></span>
+                        <!-- 基础概览 (Executive Summary) -->
+                        <div class="mb-6">
+                            <h3 class="mb-4">基础概览</h3>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="text-center">
+                                        <h4 class="mb-3">风险评分</h4>
+                                        <div class="d-inline-block position-relative" style="width: 200px; height: 200px;">
+                                            <canvas id="securityScoreChart"></canvas>
+                                            <div class="position-absolute top-50 start-50 translate-middle">
+                                                <span id="securityScoreValue" class="fs-1 fw-bold"></span>
+                                            </div>
+                                        </div>
+                                        <div class="mt-3">
+                                            <span id="securityBadge" class="security-badge"></span>
                                         </div>
                                     </div>
-                                    <div class="mt-3">
-                                        <span id="securityBadge" class="security-badge"></span>
-                                    </div>
                                 </div>
-                            </div>
-                            <div class="col-md-6">
-                                <h5 class="mb-3">检测信息</h5>
-                                <table class="table table-sm detail-table">
-                                    <tr><th>检测耗时:</th><td id="detectionTime"></td></tr>
-                                    <tr><th>检测时间:</th><td id="detectionTimestamp"></td></tr>
-                                    <tr><th>风险等级:</th><td id="riskLevel"></td></tr>
-                                    <tr><th>报告编号:</th><td id="reportId"></td></tr>
-                                </table>
-                                <div class="mt-4">
-                                    <button class="btn btn-primary" onclick="window.location.href='/';">
-                                        <i class="bi bi-arrow-left"></i> 再次检测
-                                    </button>
+                                <div class="col-md-6">
+                                    <h4 class="mb-3">判定信息</h4>
+                                    <table class="table table-sm detail-table">
+                                        <tr><th>判定结果:</th><td id="verdict"></td></tr>
+                                        <tr><th>置信度:</th><td id="confidence"></td></tr>
+                                        <tr><th>风险评分:</th><td id="riskScore"></td></tr>
+                                        <tr><th>主要致因:</th><td id="keyReason"></td></tr>
+                                        <tr><th>处理建议:</th><td id="recommendation"></td></tr>
+                                    </table>
+                                    <div class="mt-4">
+                                        <button class="btn btn-primary me-2" onclick="window.location.href='/'">
+                                            <i class="bi bi-arrow-left"></i> 再次检测
+                                        </button>
+                                        <button class="btn btn-info" onclick="showEmailContent()">
+                                            <i class="bi bi-envelope-open"></i> 查看邮件内容
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
                     </div>
                 </div>
 
-                <!-- 邮件基础信息 -->
+                <!-- 邮件头信息分析 (Header Analysis) -->
                 <div class="card">
                     <div class="card-header">
                         <h5 class="mb-0">
-                            <i class="bi bi-envelope"></i> 邮件基础信息
+                            <i class="bi bi-envelope"></i> 邮件头信息分析
                             <span class="help-icon ms-2">
                                 <i class="bi bi-question-circle"></i>
-                                <span class="tooltip">显示邮件的基本信息和认证状态</span>
+                                <span class="tooltip">显示邮件的头信息和身份验证状态</span>
                             </span>
                         </h5>
                     </div>
                     <div class="card-body">
-                        <div class="row">
-                            <div class="col-md-6">
-                                <table class="table table-sm detail-table">
-                                    <tr><th>发件人显示名:</th><td id="resultFromName"></td></tr>
-                                    <tr><th>发件人邮箱:</th><td id="resultFromEmail"></td></tr>
-                                    <tr><th>收件人:</th><td id="resultTo"></td></tr>
-                                    <tr><th>主题:</th><td id="resultSubject"></td></tr>
-                                    <tr><th>URL 数量:</th><td id="resultUrlCount"></td></tr>
-                                    <tr><th>附件数量:</th><td id="resultAttachmentCount"></td></tr>
-                                </table>
-                            </div>
-                            <div class="col-md-6">
-                                <h6 class="mb-3"><i class="bi bi-shield-lock"></i> 认证状态</h6>
-                                <div id="authStatus"></div>
-                            </div>
+                        <div class="mb-4">
+                            <h6><i class="bi bi-person"></i> 发件人详情</h6>
+                            <table class="table table-sm detail-table">
+                                <tr><th>显示名称:</th><td id="resultFromName"></td></tr>
+                                <tr><th>真实邮箱:</th><td id="resultFromEmail"></td></tr>
+                                <tr><th>匹配性检查:</th><td id="nameMatchCheck"></td></tr>
+                            </table>
+                        </div>
+                        <div class="mb-4">
+                            <h6><i class="bi bi-info-circle"></i> 邮件基本信息</h6>
+                            <table class="table table-sm detail-table">
+                                <tr><th>收件人:</th><td id="resultTo"></td></tr>
+                                <tr><th>主题:</th><td id="resultSubject"></td></tr>
+                                <tr><th>URL 数量:</th><td id="resultUrlCount"></td></tr>
+                                <tr><th>附件数量:</th><td id="resultAttachmentCount"></td></tr>
+                            </table>
+                        </div>
+                        <div class="mb-4">
+                            <h6><i class="bi bi-shield-lock"></i> 身份验证结果</h6>
+                            <div id="authStatus"></div>
+                        </div>
+                        <div class="mb-4">
+                            <h6><i class="bi bi-route"></i> 路由路径</h6>
+                            <div id="routePath"></div>
                         </div>
                     </div>
                 </div>
@@ -379,6 +396,9 @@
                         </h5>
                     </div>
                     <div class="card-body">
+                        <!-- 最高风险因素 -->
+                        <div id="highestRiskSection" class="mb-4"></div>
+                        
                         <!-- 模块评分 -->
                         <div id="moduleScoresSection" class="mb-4"></div>
                         
@@ -444,7 +464,6 @@
         function displayReport(result) {
             // 生成报告编号
             const reportId = generateReportId();
-            document.getElementById('reportId').textContent = reportId;
             
             // 设置报告信息
             const timestamp = new Date().toLocaleString();
@@ -454,58 +473,116 @@
             const isPhish = result.label === 'PHISHING';
             updateSecurityScoreChart(result.confidence, isPhish, result.label);
             
-            // 检测信息
-            document.getElementById('detectionTime').textContent = result.detection_time || '未知';
-            document.getElementById('detectionTimestamp').textContent = timestamp;
+            // 基础概览信息
+            document.getElementById('verdict').textContent = result.label;
+            document.getElementById('confidence').textContent = `${(result.confidence || 0).toFixed(2)}%`;
+            document.getElementById('riskScore').textContent = `${Math.round((result.confidence || 0) * 100)}`;
+            document.getElementById('keyReason').textContent = result.reason || '无';
             
-            // 风险等级
-            let riskLevel;
+            // 处理建议
+            let recommendation;
             if (result.label === 'PHISHING') {
-                riskLevel = '高';
+                recommendation = '建议立即删除';
             } else if (result.label === 'SUSPICIOUS') {
-                riskLevel = '中';
+                recommendation = '隔离审查';
             } else {
-                riskLevel = '低';
+                recommendation = '可安全阅读';
             }
-            document.getElementById('riskLevel').textContent = riskLevel;
+            document.getElementById('recommendation').textContent = recommendation;
             
-            // 更新邮件信息
-            document.getElementById('resultFromName').textContent = result.parsed.from_display_name || '-';
-            document.getElementById('resultFromEmail').textContent = result.parsed.from_email || '-';
-            document.getElementById('resultTo').textContent = result.parsed.to || '-';
-            document.getElementById('resultSubject').textContent = result.parsed.subject || '-';
-            document.getElementById('resultUrlCount').textContent = result.parsed.url_count || 0;
+            // 更新邮件信息 - 兼容多种数据结构
+            const parsed = result.parsed || {};
+            document.getElementById('resultFromName').textContent = parsed.from_display_name || result.from_display_name || '-';
+            document.getElementById('resultFromEmail').textContent = parsed.from_email || result.from_email || result.from_addr || '-';
+            
+            // 发件人显示名与邮箱匹配性检查
+            const fromName = parsed.from_display_name || result.from_display_name || '';
+            const fromEmail = parsed.from_email || result.from_email || result.from_addr || '';
+            let nameMatchCheck;
+            if (fromName && fromEmail) {
+                // 简单的匹配性检查：显示名中是否包含邮箱域名的部分
+                const domain = fromEmail.split('@')[1] || '';
+                if (domain && fromName.toLowerCase().includes(domain.split('.')[0].toLowerCase())) {
+                    nameMatchCheck = '<span class="badge bg-success">匹配</span>';
+                } else {
+                    nameMatchCheck = '<span class="badge bg-warning">不匹配</span>';
+                }
+            } else {
+                nameMatchCheck = '-';
+            }
+            document.getElementById('nameMatchCheck').innerHTML = nameMatchCheck;
+            
+            document.getElementById('resultTo').textContent = parsed.to || result.to_addr || '-';
+            document.getElementById('resultSubject').textContent = parsed.subject || result.subject || '-';
+            document.getElementById('resultUrlCount').textContent = parsed.url_count || (result.urls ? result.urls.length : 0) || 0;
+            const attachmentCount = parsed.attachment_count || (result.attachments ? result.attachments.length : 0) || 0;
             document.getElementById('resultAttachmentCount').innerHTML =
-                result.parsed.attachment_count > 0
-                    ? `<span class="badge bg-warning">${result.parsed.attachment_count}</span>`
+                attachmentCount > 0
+                    ? `<span class="badge bg-warning">${attachmentCount}</span>`
                     : '0';
             
             // 显示认证状态
             displayAuthStatus(result.headers);
             
-            // 显示风险指标
-            displayRiskIndicators(result.traceback?.risk_indicators || [], result.features);
+            // 显示路由路径
+            displayRoutePath(result.traceback || (result.traceback_data ? JSON.parse(result.traceback_data) : null));
+            
+            // 显示风险指标 - 兼容风险指标的不同存储方式
+            const riskIndicators = result.traceback?.risk_indicators || result.risk_indicators || [];
+            displayRiskIndicators(riskIndicators, result.features);
             
             // 显示附件分析
-            displayAttachments(result.attachments || []);
+            const attachments = result.attachments || (result.attachment_data ? JSON.parse(result.attachment_data) : []);
+            displayAttachments(attachments);
             
             // 显示 URL 分析
-            displayURLAnalysis(result.traceback?.url_analysis || [], result.html_links || []);
+            const urls = result.traceback?.url_analysis || result.urls || (result.url_data ? JSON.parse(result.url_data) : []);
+            const htmlLinks = result.html_links || [];
+            displayURLAnalysis(urls, htmlLinks);
             
             // 显示特征分析
             displayFeatureAnalysis(result.features);
             
-            // 显示溯源信息
-            displayTracebackInfo(result.traceback);
+            // 显示溯源信息 - 兼容不同存储方式
+            const traceback = result.traceback || (result.traceback_data ? JSON.parse(result.traceback_data) : null);
+            displayTracebackInfo(traceback);
             
             // 显示云沙箱分析
             displaySandboxAnalysis(result.sandbox_analysis);
+            
+            // 显示最高风险因素
+            displayHighestRiskFactors(result.highest_risk_module, result.highest_risk_score, result.reason);
             
             // 显示模块评分
             displayModuleScores(result.module_scores);
             
             // 显示评判标准
             displayJudgmentCriteria();
+        }
+        
+        function displayRoutePath(traceback) {
+            const container = document.getElementById('routePath');
+            const emailSource = traceback?.email_source || {};
+            
+            if (!emailSource.hops || emailSource.hops.length === 0) {
+                container.innerHTML = '<div class="alert alert-secondary"><i class="bi bi-route"></i> 无路由路径信息</div>';
+                return;
+            }
+            
+            let html = '<div class="timeline">';
+            emailSource.hops.forEach((hop, index) => {
+                html += `<div class="timeline-item">
+                    <div class="timeline-content">
+                        <h6> hop ${index + 1}</h6>
+                        <p><strong>IP:</strong> ${hop.ip || '未知'}</p>
+                        <p><strong>主机名:</strong> ${hop.hostname || '未知'}</p>
+                        <p><strong>时间:</strong> ${hop.timestamp || '未知'}</p>
+                    </div>
+                </div>`;
+            });
+            html += '</div>';
+            
+            container.innerHTML = html;
         }
         
         function displayJudgmentCriteria() {
@@ -611,6 +688,63 @@
             container.innerHTML = html;
         }
         
+        function displayHighestRiskFactors(highestModule, highestScore, reason) {
+            const container = document.getElementById('highestRiskSection');
+            
+            if (!highestModule) {
+                container.innerHTML = '';
+                return;
+            }
+            
+            const moduleNames = {
+                'header': '邮件头特征',
+                'url': 'URL特征',
+                'text': '文本特征',
+                'attachment': '附件特征',
+                'html': 'HTML特征'
+            };
+            
+            const scorePercentage = Math.round(highestScore * 100);
+            let color;
+            let riskLevel;
+            
+            if (scorePercentage >= 70) {
+                color = 'bg-danger';
+                riskLevel = '高风险';
+            } else if (scorePercentage >= 40) {
+                color = 'bg-warning';
+                riskLevel = '中等风险';
+            } else {
+                color = 'bg-success';
+                riskLevel = '低风险';
+            }
+            
+            let html = `<div class="alert alert-warning">
+                <h6 class="mb-2"><i class="bi bi-exclamation-triangle-fill"></i> 最高风险因素</h6>
+                <div class="card mb-3">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <strong>风险最高的模块</strong>
+                            <span class="badge ${color}">${riskLevel}</span>
+                        </div>
+                        <div class="progress mb-3" style="height: 24px;">
+                            <div class="progress-bar ${color}" role="progressbar" style="width: ${scorePercentage}%" aria-valuenow="${scorePercentage}" aria-valuemin="0" aria-valuemax="100">
+                                ${moduleNames[highestModule]}: ${scorePercentage}%
+                            </div>
+                        </div>
+                        <div class="mb-2">
+                            <strong>主要风险因素：</strong>
+                        </div>
+                        <div class="text-muted">
+                            ${reason}
+                        </div>
+                    </div>
+                </div>
+            </div>`;
+            
+            container.innerHTML = html;
+        }
+
         function displayModuleScores(moduleScores) {
             const container = document.getElementById('moduleScoresSection');
             
@@ -675,7 +809,9 @@
         }
 
         function updateSecurityScoreChart(confidence, isPhish, label) {
-            const score = Math.round(confidence * 100);
+            // 处理 NaN 或 undefined 的情况
+            const safeConfidence = confidence || 0;
+            const score = Math.round(safeConfidence * 100);
             document.getElementById('securityScoreValue').textContent = score + '%';
             
             const badgeElement = document.getElementById('securityBadge');
@@ -998,6 +1134,160 @@
             container.innerHTML = html;
         }
 
+        function showEmailContent() {
+            const parsed = currentResult.parsed || {};
+            const moduleScores = currentResult.module_scores || {};
+            
+            // 计算权重累加总分
+            const weights = {
+                'header': 0.25,
+                'url': 0.30,
+                'text': 0.20,
+                'attachment': 0.15,
+                'html': 0.10
+            };
+            
+            let totalScore = 0;
+            for (const [key, score] of Object.entries(moduleScores)) {
+                totalScore += score * weights[key] || 0;
+            }
+            
+            // 创建模态框HTML
+            let modalHtml = `
+            <div class="modal fade" id="emailContentModal" tabindex="-1" aria-labelledby="emailContentModalLabel" aria-hidden="true">
+                <div class="modal-dialog modal-lg">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title" id="emailContentModalLabel">
+                                <i class="bi bi-envelope-open"></i> 邮件内容详情
+                            </h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                        </div>
+                        <div class="modal-body">
+                            <!-- 邮件基本信息 -->
+                            <div class="mb-4">
+                                <h6><i class="bi bi-info-circle"></i> 邮件基本信息</h6>
+                                <div class="card">
+                                    <div class="card-body">
+                                        <div class="row">
+                                            <div class="col-md-6">
+                                                <p><strong>发件人:</strong> ${parsed.from || '-'}</p>
+                                                <p><strong>发件人显示名:</strong> ${parsed.from_display_name || '-'}</p>
+                                                <p><strong>发件人邮箱:</strong> ${parsed.from_email || '-'}</p>
+                                            </div>
+                                            <div class="col-md-6">
+                                                <p><strong>收件人:</strong> ${parsed.to || '-'}</p>
+                                                <p><strong>主题:</strong> ${parsed.subject || '-'}</p>
+                                                <p><strong>附件数量:</strong> ${parsed.attachment_count || 0}</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- 邮件正文 -->
+                            <div class="mb-4">
+                                <h6><i class="bi bi-file-text"></i> 邮件正文</h6>
+                                <div class="card">
+                                    <div class="card-body">
+                                        <pre class="bg-light p-3 rounded" style="white-space: pre-wrap;">${parsed.body || '无正文内容'}</pre>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- HTML正文 -->
+                            ${parsed.html_body ? `
+                            <div class="mb-4">
+                                <h6><i class="bi bi-code"></i> HTML正文</h6>
+                                <div class="card">
+                                    <div class="card-body">
+                                        <pre class="bg-light p-3 rounded" style="white-space: pre-wrap;">${parsed.html_body}</pre>
+                                    </div>
+                                </div>
+                            </div>
+                            ` : ''}
+                            
+                            <!-- 邮件头 -->
+                            <div class="mb-4">
+                                <h6><i class="bi bi-list"></i> 邮件头</h6>
+                                <div class="card">
+                                    <div class="card-body">
+                                        <pre class="bg-light p-3 rounded">${JSON.stringify(currentResult.headers || {}, null, 2)}</pre>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- 邮件分析评分详情 -->
+                            <div class="mb-4">
+                                <h6><i class="bi bi-bar-chart"></i> 邮件分析评分详情</h6>
+                                <div class="card">
+                                    <div class="card-body">
+                                        <div class="table-responsive">
+                                            <table class="table table-sm">
+                                                <thead>
+                                                    <tr>
+                                                        <th>模块</th>
+                                                        <th>评分</th>
+                                                        <th>权重</th>
+                                                        <th>加权分</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    ${Object.entries(moduleScores).map(([module, score]) => {
+                                                        const weight = weights[module] || 0;
+                                                        const weightedScore = (score * weight).toFixed(4);
+                                                        const moduleNames = {
+                                                            'header': '邮件头',
+                                                            'url': 'URL',
+                                                            'text': '文本',
+                                                            'attachment': '附件',
+                                                            'html': 'HTML'
+                                                        };
+                                                        return `
+                                                        <tr>
+                                                            <td>${moduleNames[module] || module}</td>
+                                                            <td>${score.toFixed(4)}</td>
+                                                            <td>${weight.toFixed(2)}</td>
+                                                            <td>${weightedScore}</td>
+                                                        </tr>
+                                                        `;
+                                                    }).join('')}
+                                                    <tr class="font-weight-bold">
+                                                        <td>权重累加总分</td>
+                                                        <td colspan="2"></td>
+                                                        <td>${totalScore.toFixed(4)}</td>
+                                                    </tr>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                        <div class="mt-3">
+                                            <p><strong>最终判定:</strong> ${currentResult.label} (置信度: ${(currentResult.confidence || 0).toFixed(4)})</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            `;
+            
+            // 添加模态框到页面
+            document.body.insertAdjacentHTML('beforeend', modalHtml);
+            
+            // 显示模态框
+            const modal = new bootstrap.Modal(document.getElementById('emailContentModal'));
+            modal.show();
+            
+            // 模态框关闭后清理
+            document.getElementById('emailContentModal').addEventListener('hidden.bs.modal', function() {
+                this.remove();
+            });
+        }
+
         function displayTracebackInfo(traceback) {
             const container = document.getElementById('tracebackInfo');
             const emailSource = traceback?.email_source || {};
@@ -1108,8 +1398,10 @@
         function exportReport() {
             if (!currentResult) return;
 
+            // 生成报告ID
+            const reportId = generateReportId();
             const report = {
-                report_id: document.getElementById('reportId').textContent,
+                report_id: reportId,
                 detection_time: new Date().toISOString(),
                 result: currentResult
             };

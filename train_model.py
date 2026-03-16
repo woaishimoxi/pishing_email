@@ -51,15 +51,11 @@ def load_example_data():
     
     # 加载钓鱼邮件数据
     phishing_df = pd.read_csv(phishing_file)
-    phishing_df['label'] = 2  # 钓鱼邮件
+    phishing_df['label'] = 1  # 钓鱼邮件
     
     # 加载正常邮件数据
     enron_df = pd.read_csv(enron_file)
-    # 将部分正常邮件标记为可疑
-    np.random.seed(42)
-    suspicious_mask = np.random.rand(len(enron_df)) < 0.2
     enron_df['label'] = 0  # 正常邮件
-    enron_df.loc[suspicious_mask, 'label'] = 1  # 可疑邮件
     
     # 合并数据集
     combined_df = pd.concat([phishing_df, enron_df], ignore_index=True)
@@ -140,12 +136,11 @@ def train_model(X, y):
     train_data = lgb.Dataset(X_train, label=y_train)
     test_data = lgb.Dataset(X_test, label=y_test, reference=train_data)
     
-    # 设置参数 - 三分类
+    # 设置参数 - 二分类
     params = {
         'boosting_type': 'gbdt',
-        'objective': 'multiclass',
-        'metric': 'multi_logloss',
-        'num_class': 3,
+        'objective': 'binary',
+        'metric': 'binary_logloss',
         'num_leaves': 31,
         'learning_rate': 0.05,
         'feature_fraction': 0.9,
@@ -165,13 +160,13 @@ def train_model(X, y):
     
     # 评估模型
     y_pred = model.predict(X_test, num_iteration=model.best_iteration)
-    y_pred_class = np.argmax(y_pred, axis=1)
+    y_pred_class = [1 if pred > 0.5 else 0 for pred in y_pred]
     
     print("\n模型评估结果:")
     print(f"准确率: {accuracy_score(y_test, y_pred_class):.4f}")
-    print(f"精确率: {precision_score(y_test, y_pred_class, average='weighted'):.4f}")
-    print(f"召回率: {recall_score(y_test, y_pred_class, average='weighted'):.4f}")
-    print(f"F1 分数: {f1_score(y_test, y_pred_class, average='weighted'):.4f}")
+    print(f"精确率: {precision_score(y_test, y_pred_class):.4f}")
+    print(f"召回率: {recall_score(y_test, y_pred_class):.4f}")
+    print(f"F1 分数: {f1_score(y_test, y_pred_class):.4f}")
     
     return model
 

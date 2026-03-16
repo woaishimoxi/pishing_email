@@ -167,6 +167,17 @@ def trace_url_redirects(initial_url: str, max_hops: int = 5) -> List[str]:
     return redirects
 
 
+# 可信域名白名单
+TRUSTED_DOMAINS = {
+    'qq.com', 'qlogo.cn', 'mail.qq.com', 'weixin.qq.com',
+    'steampowered.com', 'steamcommunity.com', 'steamstatic.com',
+    'valvesoftware.com', 'google.com', 'microsoft.com',
+    'facebook.com', 'baidu.com', 'taobao.com', 'jd.com'
+}
+
+# 域名年龄缓存
+DOMAIN_AGE_CACHE = {}
+
 def analyze_domain_info(domain: str) -> Dict:
     """
     分析域名信息。
@@ -187,10 +198,31 @@ def analyze_domain_info(domain: str) -> Dict:
         'age_days': 0
     }
 
+    # 检查缓存
+    if domain in DOMAIN_AGE_CACHE:
+        cached_info = DOMAIN_AGE_CACHE[domain]
+        info.update(cached_info)
+        return info
+
+    # 检查白名单
+    domain_parts = domain.split('.')
+    if len(domain_parts) >= 2:
+        registered_domain = '.'.join(domain_parts[-2:])
+        if registered_domain in TRUSTED_DOMAINS:
+            info['is_valid'] = True
+            info['registrar'] = 'Trusted Domain'
+            info['age_days'] = 3650  # 10年
+            DOMAIN_AGE_CACHE[domain] = info
+            return info
+
     try:
         import whois
         w = whois.get(domain)
         if not w or not hasattr(w, 'creation_date'):
+            # 查询失败时返回默认值，避免误判为新域名
+            info['is_valid'] = True
+            info['age_days'] = 3650  # 默认为10年
+            DOMAIN_AGE_CACHE[domain] = info
             return info
 
         info['is_valid'] = True
@@ -220,7 +252,9 @@ def analyze_domain_info(domain: str) -> Dict:
                 info['creation_date'] = creation_date
                 info['age_days'] = int(age_seconds / 86400)
             except Exception:
-                info['age_days'] = 0
+                info['age_days'] = 3650  # 解析失败时默认为10年
+        else:
+            info['age_days'] = 3650  # 没有创建日期时默认为10年
 
         # 过期日期
         expiry_date = w.expiration_date
@@ -229,9 +263,12 @@ def analyze_domain_info(domain: str) -> Dict:
         info['expiry_date'] = expiry_date
 
     except Exception:
-        # 域名信息查询失败静默处理
-        pass
+        # 域名信息查询失败时默认为10年，避免误判
+        info['is_valid'] = True
+        info['age_days'] = 3650
 
+    # 缓存结果
+    DOMAIN_AGE_CACHE[domain] = info
     return info
 
 

@@ -180,8 +180,13 @@ def parse_email(raw_email: str) -> Dict:
             html_forms = extractor.forms
             # 添加 HTML 中的链接到总 URL 列表
             for link in html_links:
-                if link.get('url') and link['url'] not in urls:
-                    urls.append(link['url'])
+                if isinstance(link, dict):
+                    url = link.get('url')
+                    if url and url not in urls:
+                        urls.append(url)
+                elif isinstance(link, str):
+                    if link not in urls:
+                        urls.append(link)
         except Exception:
             pass
 
@@ -408,19 +413,23 @@ def extract_urls_from_body(body: str) -> List[str]:
     Returns:
         List[str]: URL 列表
     """
+    if not body:
+        return []
+    
     # 匹配三种类型的URL：
     # 1. 以 http:// 或 https:// 开头的URL
     # 2. 以 www. 开头的URL
     # 3. 没有协议前缀但包含域名和路径的URL（如 zxcve.zncb.work/dingding）
-    url_pattern = r'https?://[^\s<>"]+|www\.[^\s<>"]+|[a-zA-Z0-9][-a-zA-Z0-9]{0,62}(\.[a-zA-Z0-9][-a-zA-Z0-9]{0,62})+(/[^\s<>"]*)?'
+    # 使用非捕获组 (?:...) 避免返回元组
+    url_pattern = r'https?://[^\s<>"]+|www\.[^\s<>"]+|[a-zA-Z0-9][-a-zA-Z0-9]{0,62}(?:\.[a-zA-Z0-9][-a-zA-Z0-9]{0,62})+(?:/[^\s<>"]*)?'
     urls = list(set(re.findall(url_pattern, body)))
     
     # 为没有协议前缀的URL添加 http://
     processed_urls = []
     for url in urls:
-        if not url.startswith(('http://', 'https://', 'www.')):
+        if isinstance(url, str) and not url.startswith(('http://', 'https://', 'www.')):
             processed_urls.append('http://' + url)
-        else:
+        elif isinstance(url, str):
             processed_urls.append(url)
     
     return processed_urls

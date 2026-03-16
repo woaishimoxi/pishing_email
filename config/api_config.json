@@ -5,5 +5,13 @@
   },
   "ipapi": {
     "api_url": "http://ip-api.com/json/"
+  },
+  "email": {
+    "email": "3437195366@qq.com",
+    "password": "idttrnhblknucjeh",
+    "server": "imap.qq.com",
+    "protocol": "imap",
+    "port": 993,
+    "enabled": true
   }
 }

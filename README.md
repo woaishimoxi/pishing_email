@@ -231,14 +231,62 @@ POST /api/shutdown
 }
 ```
 
+### 白名单配置
+
+系统支持通过配置文件自定义白名单，避免正常邮件被误报。
+
+**配置文件位置：** `config/whitelist.json`
+
+**配置项说明：**
+
+```json
+{
+  "trusted_domains": [
+    "qq.com",
+    "deepphish.cn",
+    "your-domain.com"
+  ],
+  "trusted_senders": [
+    "noreply@deepphish.cn",
+    "service@your-company.com"
+  ],
+  "verification_email_indicators": [
+    "验证码",
+    "verification",
+    "verify",
+    "code"
+  ],
+  "suspicious_domain_keywords": [
+    "paypa1.com",
+    "g0ogle.com"
+  ]
+}
+```
+
+| 配置项 | 说明 |
+|--------|------|
+| `trusted_domains` | 可信域名列表，系统会降低这些域名相关邮件的风险评分 |
+| `trusted_senders` | 可信发件人列表，来自这些发件人的邮件更安全 |
+| `verification_email_indicators` | 验证码邮件识别词，包含这些词汇的邮件会被视为验证码邮件 |
+| `suspicious_domain_keywords` | 已知的恶意域名（精确匹配） |
+
+**使用场景：**
+- 如果你运营自己的服务平台（如 `deepphish.cn`），将其添加到 `trusted_domains`
+- 如果经常收到来自合作伙伴的正常邮件，将其域名添加到白名单
+- 系统会自动识别验证码邮件并降低风险评分
+
+详细说明请参考 `config/README.md`
+
 ### 检测阈值
 
-默认阈值为 0.7，可在代码中调整：
+默认阈值为 0.50，可在代码中调整：
 
 ```python
-detector.set_threshold(0.6)  # 调低阈值，增加敏感度
-detector.set_threshold(0.8)  # 调高阈值，减少误报
+detector.set_threshold(0.45)  # 调低阈值，增加敏感度
+detector.set_threshold(0.60)  # 调高阈值，减少误报
 ```
+
+**注意：** 白名单邮件不受阈值影响，会自动降低风险评分。
 
 ## 系统要求
 
