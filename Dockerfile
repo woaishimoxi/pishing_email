@@ -37,5 +37,5 @@ EXPOSE 5000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:5000/api/health || exit 1
 
-# 启动命令，使用 waitress 作为 WSGI 服务器（轻量级）
-CMD ["python", "-m", "src.app"]
+# 启动命令
+CMD ["python", "src/app.py"]

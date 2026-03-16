@@ -1,8 +1,9 @@
 import sqlite3
 import os
 
-# 数据库文件路径
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'data', 'phishing_detector.db')
+# 数据库文件路径 - 与 app.py 保持一致
+PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+DB_PATH = os.path.join(PROJECT_DIR, 'data', 'alerts.db')
 
 def get_db_connection():
     """获取数据库连接"""

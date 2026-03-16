@@ -24,7 +24,10 @@ from tasks.url_scanning import scan_url
 
 
 # 初始化 Flask 应用
-app = Flask(__name__, static_folder='../static', static_url_path='/static')
+app = Flask(__name__, 
+            static_folder='../static', 
+            static_url_path='/static',
+            template_folder='templates')
 
 # 配置
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -175,8 +178,8 @@ def init_db():
         conn.close()
 
 
-# 暂时注释掉数据库初始化，避免数据库锁定问题
-# init_db()
+# 初始化数据库
+init_db()
 
 
 @app.route('/')
@@ -299,8 +302,8 @@ def process_email(raw_email: str, source: str = '手动输入', email_uid: str =
     # 生成溯源报告
     traceback_report = generate_traceback_report(parsed, vt_api_key, ip_api_url)
 
-    # 暂时注释掉数据库保存，避免数据库锁定
-    # save_to_database(parsed, label, confidence, traceback_report, source, raw_email_stored, email_uid)
+    # 保存到数据库
+    save_to_database(parsed, label, confidence, traceback_report, source, raw_email_stored, email_uid)
 
     # 使用新的任务模块进行邮件分析
     email_data = {
@@ -314,9 +317,8 @@ def process_email(raw_email: str, source: str = '手动输入', email_uid: str =
         'timestamp': datetime.now().isoformat()
     }
     
-    # 暂时注释掉异步邮件分析任务，避免数据库锁定
-    # task_result = task_analyze_email(email_data)
-    task_result = {'report': {}}
+    # 使用新的任务模块进行邮件分析
+    task_result = task_analyze_email(email_data)
 
     # 处理附件的沙箱分析结果
     attachments_with_analysis = []
