@@ -1,8 +1,8 @@
 # 面向中小型企业的轻量化钓鱼邮件检测与溯源系统
 # Docker 镜像构建文件
 
-# 使用官方 Python 3.9 slim 镜像作为基础，体积更小
-FROM python:3.9-slim
+# 使用官方 Python 3.12 slim 镜像作为基础，体积更小
+FROM python:3.12-slim
 
 # 设置工作目录
 WORKDIR /app
@@ -18,6 +18,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     g++ \
     curl \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 # 复制依赖文件并安装 Python 依赖
@@ -26,9 +27,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # 复制应用代码
 COPY src/ ./src/
+COPY config/ ./config/
+COPY static/ ./static/
+COPY src/templates/ ./src/templates/
 
-# 创建数据目录
-RUN mkdir -p data models
+# 创建数据目录并复制数据文件
+RUN mkdir -p data models logs
 
 # 暴露 Web 服务端口
 EXPOSE 5000

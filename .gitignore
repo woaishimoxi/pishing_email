@@ -35,12 +35,17 @@ env/
 # Docker
 data/*.db
 data/*.db-journal
+data/*.mbox
+data/*.csv
 models/*.txt
 models/*.pkl
 
 # Env
 .env
 .env.local
+
+# Logs
+logs/*.log
 
 # OS
 .DS_Store
