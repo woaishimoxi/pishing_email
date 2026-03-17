@@ -1,8 +1,8 @@
 import sqlite3
 import os
 
-# 数据库文件路径
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'data', 'phishing_detector.db')
+# 数据库文件路径 - 与 app.py 保持一致
+DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'data', 'alerts.db')
 
 def get_db_connection():
     """获取数据库连接"""
@@ -26,43 +26,45 @@ def init_database():
     try:
         cursor = conn.cursor()
         
-        # 创建邮件分析表
+        # 创建 alerts 表（主要告警表）
         cursor.execute('''
-        CREATE TABLE IF NOT EXISTS email_analysis (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            email_id TEXT UNIQUE,
-            subject TEXT,
-            sender TEXT,
-            recipient TEXT,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-            is_phishing INTEGER,
-            confidence REAL,
-            report TEXT
-        )
+            CREATE TABLE IF NOT EXISTS alerts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                from_addr TEXT,
+                from_display_name TEXT,
+                from_email TEXT,
+                to_addr TEXT,
+                subject TEXT,
+                detection_time TEXT,
+                label TEXT,
+                confidence REAL,
+                source_ip TEXT,
+                risk_indicators TEXT,
+                raw_email TEXT,
+                traceback_data TEXT,
+                attachment_data TEXT,
+                url_data TEXT,
+                header_data TEXT,
+                source TEXT,
+                email_hash TEXT
+            )
         ''')
         
-        # 创建特征分析表
+        # 创建 processed_uids 表
         cursor.execute('''
-        CREATE TABLE IF NOT EXISTS feature_analysis (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            email_id TEXT,
-            feature_name TEXT,
-            feature_value REAL,
-            FOREIGN KEY (email_id) REFERENCES email_analysis(email_id)
-        )
+            CREATE TABLE IF NOT EXISTS processed_uids (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                uid TEXT UNIQUE,
+                processed_at TEXT
+            )
         ''')
         
-        # 创建URL分析表
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS url_analysis (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            email_id TEXT,
-            url TEXT,
-            is_malicious INTEGER,
-            threat_type TEXT,
-            FOREIGN KEY (email_id) REFERENCES email_analysis(email_id)
-        )
-        ''')
+        # 创建索引
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_detection_time ON alerts(detection_time)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_label ON alerts(label)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_from_email ON alerts(from_email)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_email_hash ON alerts(email_hash)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_uid ON processed_uids(uid)')
         
         conn.commit()
         return True
