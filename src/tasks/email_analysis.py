@@ -145,36 +145,10 @@ def generate_report(email_data, result, features):
     return report
 
 def save_analysis_result(email_data, result, report, features):
-    """保存分析结果到数据库"""
+    """保存分析结果到数据库（已合并到 alerts 表）"""
     try:
-        email_id = email_data.get('email_id', f"{int(time.time())}")
-        
-        # 保存邮件分析结果
-        execute_update(
-            '''INSERT OR REPLACE INTO email_analysis 
-            (email_id, subject, sender, recipient, is_phishing, confidence, report) 
-            VALUES (?, ?, ?, ?, ?, ?, ?)''',
-            (email_id, email_data.get('subject', ''), email_data.get('sender', ''), 
-             email_data.get('recipient', ''), int(result['is_phishing']), 
-             result['confidence'], json.dumps(report, ensure_ascii=False))
-        )
-        
-        # 保存特征分析结果
-        for feature_name, feature_value in features.items():
-            execute_update(
-                '''INSERT OR REPLACE INTO feature_analysis 
-                (email_id, feature_name, feature_value) 
-                VALUES (?, ?, ?)''',
-                (email_id, feature_name, feature_value)
-            )
-        
-        # 保存URL分析结果
-        for url in email_data.get('urls', []):
-            execute_update(
-                '''INSERT OR REPLACE INTO url_analysis 
-                (email_id, url, is_malicious, threat_type) 
-                VALUES (?, ?, ?, ?)''',
-                (email_id, url, 0, 'unknown')  # 默认为非恶意，后续可通过URL扫描更新
-            )
+        # 注意：由于分析结果已通过 app.py 的 save_to_database 保存到 alerts 表
+        # 此处仅记录日志，不再重复保存到旧表
+        logger.info(f"邮件分析完成: {email_data.get('email_id')}, 判定: {result.get('label')}")
     except Exception as e:
-        logger.error(f"保存分析结果失败: {e}")
+        logger.error(f"记录分析结果失败: {e}")
